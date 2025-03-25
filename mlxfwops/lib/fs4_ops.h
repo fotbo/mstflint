@@ -100,7 +100,8 @@ public:
                                         vector<u_int8_t>& publicKeyData,
                                         u_int32_t& keyPairExp,
                                         image_layout_component_authentication_configuration& keyAuthConf);
-    virtual bool StorePublicKey(const char* public_key_file, const char* uuid);
+    virtual bool FwSetPublicKeys(char* fname, PrintCallBack callBackFunc = (PrintCallBack)NULL);                                        
+    virtual bool StoreImagePublicKey(const char* public_key_file, const char* uuid);
     virtual void PreparePublicKey(const vector<u_int8_t>& publicKeyData,
                                   const vector<u_int32_t>& uuidData,
                                   const u_int32_t keyPairExp,
@@ -109,7 +110,8 @@ public:
     virtual bool FwExtract4MBImage(vector<u_int8_t>& img,
                                    bool maskMagicPatternAndDevToc,
                                    bool verbose = false,
-                                   bool ignoreImageStart = false);
+                                   bool ignoreImageStart = false,
+                                   bool imageSizeOnly = false);
     virtual bool GetImageDataForSign(MlxSign::SHAType shaType, vector<u_int8_t>& img);
     virtual bool IsSecureBootSupported();
     virtual bool IsCableQuerySupported();
@@ -142,9 +144,9 @@ public:
     bool IsLifeCycleAccessible(chip_type_t chip_type);
     bool IsSecurityVersionAccessible(chip_type_t chip_type);
     bool IsSecurityVersionViolated(u_int32_t image_security_version);
-    bool GetImageInfo(u_int8_t* buff);
     virtual bool GetImageSize(u_int32_t* image_size);
     bool GetHashesTableData(vector<u_int8_t>& data);
+    bool GetRSAPublicKey(vector<u_int8_t>& key);
 
 protected:
     struct fs4_toc_info
@@ -184,7 +186,7 @@ protected:
     u_int32_t _hashes_table_ptr;
     Fs4ImgInfo _fs4ImgInfo;
 
-    bool GetImageSizeFromImageInfo(u_int32_t* imageSize);
+    bool GetEncryptedImageSizeFromImageInfo(u_int32_t* imageSize);
     bool verifyToolsArea(VerifyCallBack verifyCallBackFunc);
     bool verifyTocHeader(u_int32_t tocAddr, bool isDtoc, VerifyCallBack verifyCallBackFunc);
     bool verifyTocEntries(u_int32_t tocAddr,
@@ -206,7 +208,30 @@ protected:
                       bool verbose = false,
                       VerifyCallBack verifyCallBackFunc = (VerifyCallBack)NULL,
                       bool showItoc = false);
+    bool IsDtocExists(bool& dtocExists);
+    virtual bool GetHashesTableSize(u_int32_t& size);
+    bool GetImageInfo(u_int8_t* buff);
+    virtual bool GetDtocAddress(u_int32_t& dTocAddress);
+    bool ParseImageInfoFromEncryptedImage();
 
+    class HTOC
+    {
+    public:
+        struct image_layout_htoc_header header;
+        struct image_layout_htoc_entry* entries;
+        u_int32_t htoc_start_addr;
+        u_int8_t htoc_max_num_of_entries;
+
+        HTOC(vector<u_int8_t> img, u_int32_t hashes_table_start_addr, u_int32_t size);
+        bool GetEntryBySectionType(fs3_section_t section_type, struct image_layout_htoc_entry& htoc_entry);
+        bool AddNewEntry(FBase* ioAccess, fs3_section_t section_type, struct image_layout_htoc_entry& htoc_entry);
+        u_int8_t GetHtocMaxNumOfEntries() { return htoc_max_num_of_entries; };
+
+        u_int32_t static const HASHES_TABLE__HEADER_SIZE = 12;
+        u_int32_t static const HASHES_TABLE__TAIL_SIZE = 8;
+        u_int32_t static const HTOC__HEADER_SIZE = 16;
+        u_int32_t static const HTOC__ENTRY_SIZE = 8;
+    };
 
 private:
 #define PRE_CRC_OUTPUT "    "
@@ -220,24 +245,12 @@ private:
         INSECTION = 2
     };
 
-    class HTOC
-    {
-    public:
-        struct image_layout_htoc_header header;
-        struct image_layout_htoc_entry entries[MAX_HTOC_ENTRIES_NUM];
-        u_int32_t htoc_start_addr;
-
-        HTOC(vector<u_int8_t> img, u_int32_t hashes_table_start_addr);
-        bool GetEntryBySectionType(fs3_section_t section_type, struct image_layout_htoc_entry& htoc_entry);
-        bool AddNewEntry(FBase* ioAccess, fs3_section_t section_type, struct image_layout_htoc_entry& htoc_entry);
-    };
 
 #ifndef UEFI_BUILD
     bool FwSignSection(const vector<u_int8_t>& section, const string privPemFileStr, vector<u_int8_t>& encSha);
 #endif
     bool PrepItocSectionsForHmac(vector<u_int8_t>& critical, vector<u_int8_t>& non_critical);
     bool CheckSignatures(u_int32_t a[], u_int32_t b[], int n);
-    bool encryptedFwReadImageInfoSection();
     bool CheckDevRSAPublicKeyUUID();
     virtual bool FwQuery(fw_info_t* fwInfo,
                          bool readRom = true,
@@ -379,15 +392,26 @@ private:
 
     virtual bool
       GetPublicKeyFromFile(const char* public_key_file, const char* uuid, image_layout_file_public_keys_3* public_key);
-    virtual bool GetFreeSlotInPublicKeys2(fs4_toc_info* itocEntry, u_int32_t& idx);
-    virtual bool IsPublicKeyAlreadyInPublicKeys2(const image_layout_file_public_keys_2& public_key,
-                                                 fs4_toc_info* itocEntry);
-    virtual bool StorePublicKeyInPublicKeys2(const image_layout_file_public_keys_3& public_key);
-    virtual bool GetFRCKey(image_layout_file_public_keys_3& frc_key);
+    virtual bool GetFreeSlotInPublicKeys2(const image_layout_public_keys_2& public_keys, u_int32_t& idx);
+    virtual bool GetFreeSlotInPublicKeys3(const image_layout_public_keys_3& public_keys, u_int32_t& idx);
+    virtual bool FindPublicKeyInPublicKeys2(const image_layout_public_keys_2& public_keys,
+                                            const image_layout_file_public_keys_2& public_key,
+                                            u_int32_t& idx);
+    virtual bool FindPublicKeyInPublicKeys3(const image_layout_public_keys_3& public_keys,
+                                            const image_layout_file_public_keys_3& public_key,
+                                            u_int32_t& idx);
+    virtual bool FindImagePublicKeyInPublicKeys2(const image_layout_public_keys_2& public_keys, u_int32_t& idx);
+    virtual bool FindImagePublicKeyInPublicKeys3(const image_layout_public_keys_3& public_keys, u_int32_t& idx);
+    virtual bool StoreImagePublicKeyInPublicKeys2(const image_layout_file_public_keys_3& public_key);
+    virtual bool StoreImagePublicKeyInPublicKeys3(const image_layout_file_public_keys_3& public_key);
     virtual bool FindPublicKeyInPublicKeys2(const vector<u_int32_t>& keypair_uuid,
                                             bool& found,
                                             image_layout_file_public_keys_3& public_key);
-    bool GetHashesTableSize(u_int32_t& size);
+    virtual void PublicKey2ToPublicKey3(const image_layout_file_public_keys_2& public_key_2,
+                                        image_layout_file_public_keys_3& public_key_3);
+    virtual void PublicKey3ToPublicKey2(const image_layout_file_public_keys_3& public_key_3,
+                                        image_layout_file_public_keys_2& public_key_2);
+    virtual bool ReadPublicKeys2SectionFromFile(const char* fname, image_layout_public_keys_2& public_keys_2_section);
     
     // Members
     u_int32_t _boot_record_ptr;

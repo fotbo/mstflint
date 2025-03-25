@@ -1,6 +1,6 @@
 /*
  * Copyright (C) Jan 2020 Mellanox Technologies Ltd. All rights reserved.
- * Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -38,6 +38,7 @@
  *  Created on: Jul 8, 2020
  *      Author: edwardg
  */
+#include "common/tools_time.h"
 #include "mflash_pack_layer.h"
 #include "mflash_dev_capability.h"
 #include "mflash_access_layer.h"
@@ -65,6 +66,14 @@
 
 static int set_gw_data_size(mflash* mfl, u_int32_t data_size, u_int32_t* gw_cmd)
 {
+    if (mfl->mf->is_zombiefish)
+    {
+        if (!mfl->mf->vsc_recovery_space_flash_control_vld)
+        {
+            return MFE_VSC_RECOVERY_SPACE_FLASH_CONTROL_NOT_VALID;
+        }
+        mset_addr_space(mfl->mf, AS_RECOVERY);
+    }
     FlashGen flash_gen = get_flash_gen(mfl);
     if (flash_gen == SIX_GEN_FLASH)
     {
@@ -92,7 +101,7 @@ static int st_spi_wait_wip(mflash* mfl, u_int32_t init_delay_us, u_int32_t retry
     u_int8_t status = 0;
     u_int32_t i = 0;
 
-    usleep(init_delay_us);
+    mft_usleep(init_delay_us);
 
     for (i = 0; i < num_of_retries; ++i)
     {
@@ -102,7 +111,7 @@ static int st_spi_wait_wip(mflash* mfl, u_int32_t init_delay_us, u_int32_t retry
         {
             return MFE_OK;
         }
-        usleep(retry_delay_us);
+        mft_usleep(retry_delay_us);
         if (mfl->cputUtilizationApplied)
         {
             if ((i % mfl->cpuPercent) == 0)
@@ -134,6 +143,14 @@ static bool is_x_byte_address_access_commands(mflash* mfl, int x)
 }
 static int new_gw_exec_cmd(mflash* mfl, u_int32_t gw_cmd, char* msg)
 {
+    if (mfl->mf->is_zombiefish)
+    {
+        if (!mfl->mf->vsc_recovery_space_flash_control_vld)
+        {
+            return MFE_VSC_RECOVERY_SPACE_FLASH_CONTROL_NOT_VALID;
+        }
+        mset_addr_space(mfl->mf, AS_RECOVERY);
+    }
     gw_cmd = MERGE(gw_cmd, 1, 31, 1); // Making sure lock bit stays locked
     if ((gw_cmd & (1 << mfl->gw_addr_phase_bit_offset)) != 0)
     { // This is an access command
@@ -169,6 +186,14 @@ static int new_gw_exec_cmd(mflash* mfl, u_int32_t gw_cmd, char* msg)
 static int
   new_gw_exec_cmd_get(mflash* mfl, u_int32_t gw_cmd, u_int32_t* buff, int buff_dword_sz, u_int32_t* addr, char* msg)
 {
+    if (mfl->mf->is_zombiefish)
+    {
+        if (!mfl->mf->vsc_recovery_space_flash_control_vld)
+        {
+            return MFE_VSC_RECOVERY_SPACE_FLASH_CONTROL_NOT_VALID;
+        }
+        mset_addr_space(mfl->mf, AS_RECOVERY);
+    }
     int rc = 0;
     if (!mfl || !buff || !buff_dword_sz)
     {
@@ -216,6 +241,14 @@ static int
 static int
   new_gw_exec_cmd_set(mflash* mfl, u_int32_t gw_cmd, u_int32_t* buff, int buff_dword_sz, u_int32_t* addr, char* msg)
 {
+    if (mfl->mf->is_zombiefish)
+    {
+        if (!mfl->mf->vsc_recovery_space_flash_control_vld)
+        {
+            return MFE_VSC_RECOVERY_SPACE_FLASH_CONTROL_NOT_VALID;
+        }
+        mset_addr_space(mfl->mf, AS_RECOVERY);
+    }
     int rc = 0;
     if (!mfl)
     {
@@ -276,6 +309,7 @@ int new_gw_int_spi_get_status_data(mflash* mfl, u_int8_t op_type, u_int32_t* sta
     CHECK_RC(rc);
     DPRINTF(("new_gw_int_spi_get_status_data: op=%02x status=%08x\n", op_type, flash_data));
     *status = (flash_data >> 8 * (4 - bytes_num));
+    DPRINTF(("new_gw_int_spi_get_status_data: after shift status=%08x\n", *status));
     return MFE_OK;
 }
 int new_gw_st_spi_write_enable(mflash* mfl)

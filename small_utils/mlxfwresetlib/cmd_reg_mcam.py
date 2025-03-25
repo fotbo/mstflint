@@ -43,12 +43,17 @@ class CmdRegMcam():
     def __init__(self, reg_access):
 
         self._reg_access = reg_access
-        self._mcam_get_result = None
+        self._mcam_get_results = [None] * 3
 
-    def get_mcam(self):
-        if self._mcam_get_result is None:
-            self._mcam_get_result = self._reg_access.getMCAM()
-        return self._mcam_get_result
+    def get_mcam(self, access_reg_group=0):
+        try:
+            if self._mcam_get_results[access_reg_group] is None:
+                self._mcam_get_results[access_reg_group] = self._reg_access.getMCAM(access_reg_group)
+            return self._mcam_get_results[access_reg_group]
+        except IndexError as ie:
+            raise Exception("get_mcam() was called with invalid access_reg_group=%s\n" % str(access_reg_group))
+        except Exception as e:
+            raise e
 
     def is_pci_rescan_required_supported(self):
         """
@@ -79,6 +84,38 @@ class CmdRegMcam():
             # so we actually access the 4th DWORD (index 3)
             pci_sync_for_fw_update_sup = extractField(mcam_get_result["mng_feature_cap_mask"][3 - 0], 19, 1)
         return True if pci_sync_for_fw_update_sup == 1 else False
+
+    def is_mrsi_supported(self):
+        """
+        send MCAM access_reg_group=2
+        and then read mng_access_reg_cap_mask (bit 10 in 2nd DWORD) to see if MRSI is supported.
+        """
+        try:
+            mcam_get_result = self.get_mcam(2)
+        except RegAccException as e:
+            mrsi_sup = 0
+        else:
+            # bit 42 is bit 10 in 2nd DWORD.
+            # due to FW bug, MCAM mng_feature_cap_mask dwords are set in reversed order
+            # so we actually access the 3rd DWORD (index 2)
+            mrsi_sup = extractField(mcam_get_result["mng_access_reg_cap_mask"][3 - 1], 10, 1)
+        return True if mrsi_sup == 1 else False
+
+    def is_mroq_supported(self):
+        """
+        send MROQ access_reg_group=0
+        and then read mng_access_reg_cap_mask (bit 47 in 2nd DWORD) to see if MROQ is supported.
+        """
+        try:
+            mcam_get_result = self.get_mcam()
+        except RegAccException as e:
+            mroq_sup = 0
+        else:
+            # bit 47 is bit 14 in 2nd DWORD.
+            # due to FW bug, MCAM mng_feature_cap_mask dwords are set in reversed order
+            # so we actually access the 3rd DWORD (index 2)
+            mroq_sup = extractField(mcam_get_result["mng_access_reg_cap_mask"][3 - 1], 15, 1)
+        return True if mroq_sup == 1 else False
 
     def reset_sync_query_text(self, tool_owner_support):
         result = ""

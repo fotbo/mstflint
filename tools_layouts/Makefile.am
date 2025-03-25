@@ -33,18 +33,18 @@
 # Makefile.am -- Process this file with automake to produce Makefile.in
 AM_CPPFLAGS = -I$(top_srcdir)/${MTCR_CONFIG_DIR} -I$(top_srcdir)/common
 AM_CFLAGS = -Wall -W -g -MP -MD -pipe $(COMPILER_FPIC)
-AM_CXXFLAGS =  -DDATA_PATH=\"$(pkgdatadir)\" 
+AM_CXXFLAGS =  -DDATA_PATH=\"$(pkgdatadir)\"
 
 SUBDIRS = ${ADABE_DBS}
 
-lib_LTLIBRARIES = libadb_utils.a libtools_layouts.a libmlxarchive_layouts.a libmlxconfig_4th_gen_layouts.a
+noinst_LTLIBRARIES = libadb_utils.la libtools_layouts.la libmlxarchive_layouts.la
 
 toolslayoutsincludedir = $(includedir)/mstflint/tools_layouts/
 
 toolslayoutsinclude_HEADERS = icmd_layouts.h icmd_hca_layouts.h adb_to_c_utils.h
-libadb_utils_a_SOURCES = adb_to_c_utils.c
+libadb_utils_la_SOURCES = adb_to_c_utils.c
 
-libtools_layouts_a_SOURCES = prm_adb_db.cpp prm_adb_db.h \
+libtools_layouts_la_SOURCES = prm_adb_db.cpp prm_adb_db.h \
 				adb_to_c_utils.c adb_to_c_utils.h\
 				cibfw_layouts.c cibfw_layouts.h \
 				register_access_open_layouts.h register_access_open_layouts.c \
@@ -60,11 +60,9 @@ libtools_layouts_a_SOURCES = prm_adb_db.cpp prm_adb_db.h \
 				reg_access_switch_layouts.c reg_access_switch_layouts.h \
 				fs5_image_layout_layouts.h fs5_image_layout_layouts.c
 
-libtools_layouts_a_DEPENDENCIES = libadb_utils.a
-libmlxarchive_layouts_a_DEPENDENCIES = $(libtools_layouts_a_DEPENDENCIES)
-libmlxarchive_layouts_a_LIBADD = $(libtools_layouts_a_LIBADD)
-libmlxarchive_layouts_a_SOURCES = mlxarchive_layouts.h mlxarchive_layouts.c
+libtools_layouts_la_DEPENDENCIES = libadb_utils.la
+libmlxarchive_layouts_la_DEPENDENCIES = $(libtools_layouts_la_DEPENDENCIES)
+libmlxarchive_layouts_la_LIBADD = $(libtools_layouts_la_LIBADD)
+libmlxarchive_layouts_la_SOURCES = mlxarchive_layouts.h mlxarchive_layouts.c
 
-libmlxconfig_4th_gen_layouts_a_SOURCES = mlxconfig_4th_gen_layouts.h mlxconfig_4th_gen_layouts.c
-libmlxconfig_4th_gen_layouts_a_DEPENDENCIES = libadb_utils.a
 EXTRA_DIST = ${ADABE_DBS_EXTRA_DIST}

@@ -45,6 +45,7 @@ MlxlinkCablesCommander::MlxlinkCablesCommander(Json::Value& jsonRoot) : _jsonRoo
     _prbsMode = PRBS31;
     _prbsInv = false;
     _prbsSwap = false;
+    _swControlMode = false;
     _prbsLanes = 0;
 
     memset(&_cableDdm, 0, sizeof(cable_ddm_q_t));
@@ -58,6 +59,11 @@ MlxlinkCablesCommander::MlxlinkCablesCommander(Json::Value& jsonRoot) : _jsonRoo
 }
 
 MlxlinkCablesCommander::~MlxlinkCablesCommander() {}
+
+void MlxlinkCablesCommander::setSwControlMode()
+{
+    _swControlMode = true;
+}
 
 // Read EEPROM data from MCIA register
 void MlxlinkCablesCommander::readMCIA(u_int32_t page,
@@ -178,19 +184,22 @@ u_int16_t MlxlinkCablesCommander::getStatusBit(u_int32_t channel, u_int16_t val,
 
 void MlxlinkCablesCommander::getDdmValuesFromPddr()
 {
-    sendPrmReg(ACCESS_REG_PDDR, GET, "page_select=%d", PDDR_MODULE_INFO_PAGE);
-
-    _cableDdm.channels = _numOfLanes;
-    _cableDdm.temperature.val = getFieldValue("temperature") / 256;
-    _cableDdm.voltage.val = getFieldValue("voltage") / MILLIVOLT_UNIT;
-
-    string laneStr = "";
-    for (int lane = 0; lane < _cableDdm.channels; lane++)
+    if (!_swControlMode)
     {
-        laneStr = to_string(lane);
-        _cableDdm.rx_power[lane].val = getPower(getFieldValue("rx_power_lane" + laneStr));
-        _cableDdm.tx_power[lane].val = getPower(getFieldValue("tx_power_lane" + laneStr));
-        _cableDdm.tx_bias[lane].val = getFieldValue("tx_bias_lane" + laneStr);
+        sendPrmReg(ACCESS_REG_PDDR, GET, "page_select=%d", PDDR_MODULE_INFO_PAGE);
+
+        _cableDdm.channels = _numOfLanes;
+        _cableDdm.temperature.val = getFieldValue("temperature") / 256;
+        _cableDdm.voltage.val = getFieldValue("voltage") / MILLIVOLT_UNIT;
+
+        string laneStr = "";
+        for (int lane = 0; lane < _cableDdm.channels; lane++)
+        {
+            laneStr = to_string(lane);
+            _cableDdm.rx_power[lane].val = getPower(getFieldValue("rx_power_lane" + laneStr));
+            _cableDdm.tx_power[lane].val = getPower(getFieldValue("tx_power_lane" + laneStr));
+            _cableDdm.tx_bias[lane].val = getFieldValue("tx_bias_lane" + laneStr);
+        }
     }
 }
 
@@ -826,6 +835,13 @@ void MlxlinkCablesCommander::initValidPages()
         ;
         readFromPage(page0L, EXTENDED_PAGES_1_2_10_11_ADDR, &extendedPages);
         free(page0L);
+        /*
+        if P 0x0L, B2:7=0, dump:
+            01h,
+            02h,
+            10h,
+            11h
+        */
         if (!(extendedPages & EXTENDED_PAGES_1_2_10_11_MASK))
         {
             p = page_t{PAGE_01, UPPER_PAGE_OFFSET, I2C_ADDR_LOW};
@@ -839,14 +855,80 @@ void MlxlinkCablesCommander::initValidPages()
                 p = page_t{PAGE_11, UPPER_PAGE_OFFSET, I2C_ADDR_LOW};
                 _validPages.push_back(p);
 
-                // if p 1, B155:6=1, dump page 0x4 (H)
-                //                   dump page 0x12 (H)
-                //         B142:5=1, dump page 0x13 (H)
-                //                   dump page 0x14 (H)
                 u_int8_t* page1H = (u_int8_t*)calloc(CABLE_PAGE_SIZE, sizeof(u_int8_t));
                 loadEEPRMPage(PAGE_01, UPPER_PAGE_OFFSET, page1H);
                 ;
+                /*
+                if P 0x1H, B142:2=1 dump:
+                    03h
+                if P 0x1H, B142:3=1 dump:
+                    05h
+                if P 0x1H, B142:5=1 dump:
+                    13h,
+                    14h
+                if P 0x1H, B142:6=1 dump:
+                    20h-2Dh,
+                    2Fh
+                if P 0x1H, B142:7=1 dump:
+                    16h,
+                    17h
+                */
                 u_int8_t extendedQsfpPages = 0;
+                readFromPage(page1H, (EXTENDED_PAGES_03_05_13_14_16_17_20_UPTO_2D_2F_ADDR - UPPER_PAGE_OFFSET),
+                             &extendedQsfpPages);
+                if (extendedQsfpPages & EXTENDED_PAGES_03_MASK)
+                {
+                    p = page_t{PAGE_03, UPPER_PAGE_OFFSET, I2C_ADDR_LOW};
+                    _validPages.push_back(p);
+                }
+                if (extendedQsfpPages & EXTENDED_PAGES_05_MASK)
+                {
+                    p = page_t{PAGE_05, UPPER_PAGE_OFFSET, I2C_ADDR_LOW};
+                    _validPages.push_back(p);
+                }
+                if (extendedQsfpPages & EXTENDED_PAGES_13_14_MASK)
+                {
+                    p = page_t{PAGE_13, UPPER_PAGE_OFFSET, I2C_ADDR_LOW};
+                    _validPages.push_back(p);
+                    p = page_t{PAGE_14, UPPER_PAGE_OFFSET, I2C_ADDR_LOW};
+                    _validPages.push_back(p);
+                }
+                if (extendedQsfpPages & EXTENDED_PAGES_16_17_MASK)
+                {
+                    p = page_t{PAGE_16, UPPER_PAGE_OFFSET, I2C_ADDR_LOW};
+                    _validPages.push_back(p);
+                    p = page_t{PAGE_17, UPPER_PAGE_OFFSET, I2C_ADDR_LOW};
+                    _validPages.push_back(p);
+                }
+                if (extendedQsfpPages & EXTENDED_PAGES_20_UPTO_2D_2F_MASK)
+                {
+                    for (u_int32_t page = PAGE_20; page <= PAGE_2D; page++)
+                    {
+                        p = page_t{page, UPPER_PAGE_OFFSET, I2C_ADDR_LOW};
+                        _validPages.push_back(p);
+                    }
+                    p = page_t{PAGE_2F, UPPER_PAGE_OFFSET, I2C_ADDR_LOW};
+                    _validPages.push_back(p);
+                }
+
+                /*
+                if P 0x1H, B145:3=1 dump:
+                    15h
+                */
+                extendedQsfpPages = 0;
+                readFromPage(page1H, (EXTENDED_PAGES_15_ADDR - UPPER_PAGE_OFFSET), &extendedQsfpPages);
+                if (extendedQsfpPages & EXTENDED_PAGES_15_MASK)
+                {
+                    p = page_t{PAGE_15, UPPER_PAGE_OFFSET, I2C_ADDR_LOW};
+                    _validPages.push_back(p);
+                }
+
+                /*
+                if P 0x1H, B155:6=1 dump:
+                    04h,
+                    12h
+                */
+                extendedQsfpPages = 0;
                 readFromPage(page1H, (EXTENDED_PAGES_4_12_ADDR - UPPER_PAGE_OFFSET), &extendedQsfpPages);
                 if (extendedQsfpPages & EXTENDED_PAGES_4_12_MASK)
                 {
@@ -855,19 +937,82 @@ void MlxlinkCablesCommander::initValidPages()
                     p = page_t{PAGE_12, UPPER_PAGE_OFFSET, I2C_ADDR_LOW};
                     _validPages.push_back(p);
                 }
+
+                /*
+                if P 0x1H, B162:6=1 dump:
+                    19h,
+                */
                 extendedQsfpPages = 0;
-                readFromPage(page1H, (EXTENDED_PAGES_13_14_ADDR - UPPER_PAGE_OFFSET), &extendedQsfpPages);
-                if (extendedQsfpPages & EXTENDED_PAGES_13_14_MASK)
+                readFromPage(page1H, (EXTENDED_PAGES_19_ADDR - UPPER_PAGE_OFFSET), &extendedQsfpPages);
+                if (extendedQsfpPages & EXTENDED_PAGES_19_MASK)
                 {
-                    p = page_t{PAGE_13, UPPER_PAGE_OFFSET, I2C_ADDR_LOW};
-                    _validPages.push_back(p);
-                    p = page_t{PAGE_14, UPPER_PAGE_OFFSET, I2C_ADDR_LOW};
+                    p = page_t{PAGE_19, UPPER_PAGE_OFFSET, I2C_ADDR_LOW};
                     _validPages.push_back(p);
                 }
+
+                /*
+                if P 0x1H, B163:0-4=1 dump:
+                    A0h
+                elif P 0x1H, B163:0-4=2 dump:
+                    A0h-A1h
+                elif P 0x1H, B163:0-4=3 dump:
+                    A0h-A2h
+                elif P 0x1H, B163:0-4=4 dump:
+                    A0h-A3h
+                elif P 0x1H, B163:0-4=5 dump:
+                    A0h-A7h
+                elif P 0x1H, B163:0-4=6 dump:
+                    A0h-Abh
+                elif P 0x1H, B163:0-4=7 dump:
+                    A0h-Afh
+                */
+                extendedQsfpPages = 0;
+                readFromPage(page1H, (EXTENDED_PAGES_A0_UPTO_AF_ADDR - UPPER_PAGE_OFFSET), &extendedQsfpPages);
+                extendedQsfpPages = extendedQsfpPages & EXTENDED_PAGES_A0_UPTO_AF_MASK;
+                if (extendedQsfpPages > 0 && extendedQsfpPages <= 7)
+                {
+                    u_int32_t end_page = 0;
+                    if (extendedQsfpPages == 1)
+                        end_page = PAGE_A0;
+                    if (extendedQsfpPages == 2)
+                        end_page = PAGE_A1;
+                    if (extendedQsfpPages == 3)
+                        end_page = PAGE_A2;
+                    if (extendedQsfpPages == 4)
+                        end_page = PAGE_A3;
+                    if (extendedQsfpPages == 5)
+                        end_page = PAGE_A7;
+                    if (extendedQsfpPages == 6)
+                        end_page = PAGE_AB;
+                    if (extendedQsfpPages == 7)
+                        end_page = PAGE_AF;
+                    for (u_int32_t page = PAGE_A0; page <= end_page; page++)
+                    {
+                        p = page_t{page, UPPER_PAGE_OFFSET, I2C_ADDR_LOW};
+                        _validPages.push_back(p);
+                    }
+                }
+                /*
+                if P 0x1H, B163:6-7=1 dump:
+                    9Fh
+                if P 0x1H, B163:6-7=2 dump:
+                    9Fh
+                */
+                extendedQsfpPages = 0;
+                readFromPage(page1H, (EXTENDED_PAGES_9F_ADDR - UPPER_PAGE_OFFSET), &extendedQsfpPages);
+                extendedQsfpPages = extendedQsfpPages & EXTENDED_PAGES_9F_MASK;
+                extendedQsfpPages = extendedQsfpPages >> 6;
+                if (extendedQsfpPages > 0 && extendedQsfpPages < 3)
+                {
+                    p = page_t{PAGE_9F, UPPER_PAGE_OFFSET, I2C_ADDR_LOW};
+                    _validPages.push_back(p);
+                }
+
                 free(page1H);
             }
         }
     }
+    std::sort(_validPages.begin(), _validPages.end(), [](const page_t& a, const page_t& b) { return a.page < b.page; });
 }
 
 // Query dump EEPROM pages
@@ -892,7 +1037,7 @@ vector<MlxlinkCmdPrint> MlxlinkCablesCommander::getPagesToDump()
 void MlxlinkCablesCommander::writeToEEPROM(u_int16_t page, u_int16_t offset, vector<u_int8_t>& bytesToWrite)
 {
     // check the page, offset and data size validity
-    checkParams(page, offset, bytesToWrite.size());
+    checkParams(offset, bytesToWrite.size());
 
     u_int32_t numberOfZeroBytes = 0;
     // adding zero bytes to work with dword blocks
@@ -912,7 +1057,7 @@ void MlxlinkCablesCommander::writeToEEPROM(u_int16_t page, u_int16_t offset, vec
     free(data);
 }
 // Checking read command parameters and initializing the valid pages
-void MlxlinkCablesCommander::checkParams(u_int16_t page, u_int16_t offset, u_int16_t length)
+void MlxlinkCablesCommander::checkParams(u_int16_t offset, u_int16_t length)
 {
     if (offset > (EEPROM_PAGE_LENGTH + 1))
     {
@@ -926,60 +1071,12 @@ void MlxlinkCablesCommander::checkParams(u_int16_t page, u_int16_t offset, u_int
     {
         throw MlxRegException("The length of bytes exceeded the page size.", length);
     }
-    initValidPages();
-    bool lowerPageAccess = offset < CABLE_PAGE_SIZE;
-    bool upperPageAccess = (offset > (CABLE_PAGE_SIZE - 1)) || ((length + offset) > CABLE_PAGE_SIZE);
-    bool lowerValid = false;
-    bool upperValid = false;
-    for (u_int32_t i = 0; i < _validPages.size(); i++)
-    {
-        if (_validPages[i].page == page)
-        {
-            if (lowerPageAccess)
-            {
-                if (_validPages[i].offset == LOWER_PAGE_OFFSET)
-                {
-                    lowerValid = true;
-                }
-            }
-            if (upperPageAccess)
-            {
-                if (_validPages[i].offset == UPPER_PAGE_OFFSET)
-                {
-                    upperValid = true;
-                }
-            }
-            if (lowerPageAccess && upperPageAccess)
-            {
-                if (lowerValid && upperValid)
-                {
-                    break;
-                }
-            }
-            else if (lowerValid || upperValid)
-            {
-                break;
-            }
-        }
-        else if (i == _validPages.size() - 1)
-        {
-            throw MlxRegException("Invalid access to page 0x%x", page);
-        }
-    }
-    if (lowerPageAccess && !lowerValid)
-    {
-        throw MlxRegException("Invalid access to page 0x%x low", page);
-    }
-    else if (upperPageAccess && !upperValid)
-    {
-        throw MlxRegException("Invalid access to page 0x%x high", page);
-    }
 }
 
 // Reading specific offset\page from cable EEPRM
 MlxlinkCmdPrint MlxlinkCablesCommander::readFromEEPRM(u_int16_t page, u_int16_t offset, u_int16_t length)
 {
-    checkParams(page, offset, length);
+    checkParams(offset, length);
 
     u_int8_t* pageL = NULL;
     u_int8_t* pageH = NULL;
@@ -1425,12 +1522,20 @@ void MlxlinkCablesCommander::showControlParams()
     MlxlinkCmdPrint controlParamsOutput = MlxlinkCmdPrint();
     setPrintTitle(controlParamsOutput, "Module Control Parameters", CABLE_CONTROL_PARAMETERS_SET_RX_AMP);
 
-    sendPrmReg(ACCESS_REG_PDDR, GET, "page_select=%d", PDDR_MODULE_INFO_PAGE);
+    u_int32_t txEq = 0;
+    u_int32_t rxPostEmph = 0;
+    u_int32_t rxAmp = 0;
+    float rxEmph = 0.0;
+    if (!_isSwControled)
+    {
+        sendPrmReg(ACCESS_REG_PDDR, GET, "page_select=%d", PDDR_MODULE_INFO_PAGE);
 
-    u_int32_t txEq = getFieldValue("cable_tx_equalization");
-    float rxEmph = (double)getFieldValue("cable_rx_emphasis");
-    u_int32_t rxPostEmph = getFieldValue("cable_rx_post_emphasis");
-    u_int32_t rxAmp = getFieldValue("cable_rx_amp");
+        txEq = getFieldValue("cable_tx_equalization");
+        rxEmph = (double)getFieldValue("cable_rx_emphasis");
+        rxPostEmph = getFieldValue("cable_rx_post_emphasis");
+        rxAmp = getFieldValue("cable_rx_amp");
+    }
+    
     bool isCmis = _cableIdentifier >= IDENTIFIER_SFP_DD;
 
     sendPrmReg(ACCESS_REG_PMCR, GET);

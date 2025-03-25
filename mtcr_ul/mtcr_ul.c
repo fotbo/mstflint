@@ -39,6 +39,7 @@
 #include <errno.h>
 #include <common/tools_utils.h>
 #include <stdlib.h>
+#include <string.h>
 
 int mread4(mfile* mf, unsigned int offset, u_int32_t* value)
 {
@@ -63,14 +64,13 @@ int mwrite4_block(mfile* mf, unsigned int offset, u_int32_t* data, int byte_len)
 int msw_reset(mfile* mf)
 {
 #ifndef NO_INBAND
-    switch (mf->tp)
-    {
-        case MST_IB:
-            return mib_swreset(mf);
+    switch (mf->tp) {
+    case MST_IB:
+        return mib_swreset(mf);
 
-        default:
-            errno = EPERM;
-            return -1;
+    default:
+        errno = EPERM;
+        return -1;
     }
 #else
     (void)mf;
@@ -92,7 +92,42 @@ int mdevices(char* buf, int len, int mask)
 
 dev_info* mdevices_info(int mask, int* len)
 {
-    return mdevices_info_ul(mask, len);
+    int counter, new_length = 0;
+
+    dev_info* dev_info_all = mdevices_info_ul(mask, len);
+    dev_info* dev_info_new = (dev_info*)malloc(sizeof(dev_info) * *len);
+
+    // Remove devices without VSEC supported.
+    for (counter = 0; counter < *len; counter++)
+    {
+        mfile* mf = mopen(dev_info_all[counter].dev_name);
+        if (!mf)
+        {
+            *len = 0;
+            free(dev_info_new);
+            return NULL;
+        }
+        if (is_pcie_switch_device(mf) && !mf->functional_vsec_supp)
+        {
+            mclose(mf);
+            continue;
+        }
+
+        memcpy(&dev_info_new[new_length], &dev_info_all[counter], sizeof(dev_info));
+        new_length++;
+        mclose(mf);
+    }
+
+    for (counter = 0; counter < new_length; counter++)
+    {
+        memcpy(&dev_info_all[counter], &dev_info_new[counter], sizeof(dev_info));
+    }
+
+    *len = new_length;
+
+    free(dev_info_new);
+    return dev_info_all;
+
 }
 
 dev_info* mdevices_info_v(int mask, int* len, int verbosity)
@@ -103,27 +138,20 @@ dev_info* mdevices_info_v(int mask, int* len, int verbosity)
 void mdevices_info_destroy(dev_info* dev_info, int len)
 {
     int i, j;
-    if (dev_info)
-    {
-        for (i = 0; i < len; i++)
-        {
-            if (dev_info[i].type == MDEVS_TAVOR_CR && dev_info[i].pci.ib_devs)
-            {
-                for (j = 0; dev_info[i].pci.ib_devs[j]; j++)
-                {
-                    if (dev_info[i].pci.ib_devs[j])
-                    {
+
+    if (dev_info) {
+        for (i = 0; i < len; i++) {
+            if ((dev_info[i].type == MDEVS_TAVOR_CR) && dev_info[i].pci.ib_devs) {
+                for (j = 0; dev_info[i].pci.ib_devs[j]; j++) {
+                    if (dev_info[i].pci.ib_devs[j]) {
                         free(dev_info[i].pci.ib_devs[j]);
                     }
                 }
                 free(dev_info[i].pci.ib_devs);
             }
-            if (dev_info[i].type == MDEVS_TAVOR_CR && dev_info[i].pci.net_devs)
-            {
-                for (j = 0; dev_info[i].pci.net_devs[j]; j++)
-                {
-                    if (dev_info[i].pci.net_devs[j])
-                    {
+            if ((dev_info[i].type == MDEVS_TAVOR_CR) && dev_info[i].pci.net_devs) {
+                for (j = 0; dev_info[i].pci.net_devs[j]; j++) {
+                    if (dev_info[i].pci.net_devs[j]) {
                         free(dev_info[i].pci.net_devs[j]);
                     }
                 }
@@ -141,8 +169,7 @@ mfile* mopen(const char* name)
 
 mfile* mopend(const char* name, DType dtype)
 {
-    if (dtype != MST_TAVOR)
-    {
+    if (dtype != MST_TAVOR) {
         return NULL;
     }
     return mopen(name);
@@ -156,14 +183,11 @@ int mclose(mfile* mf)
 mfile* mopen_adv(const char* name, MType mtype)
 {
     mfile* mf = mopend(name, MST_TAVOR);
-    if (mf)
-    {
-        if (mf->tp & mtype)
-        {
+
+    if (mf) {
+        if (mf->tp & mtype) {
             return mf;
-        }
-        else
-        {
+        } else {
             errno = EPERM;
             mclose(mf);
             return NULL;
@@ -174,11 +198,20 @@ mfile* mopen_adv(const char* name, MType mtype)
 
 mfile* mopen_fw_ctx(void* fw_cmd_context, void* fw_cmd_func, void* extra_data)
 {
-    // not implemented
+    /* not implemented */
     TOOLS_UNUSED(fw_cmd_context);
     TOOLS_UNUSED(fw_cmd_func);
     TOOLS_UNUSED(extra_data);
     return NULL;
+}
+
+void get_pci_dev_rdma(mfile* mf, char* buf)
+{
+    if ((mf != NULL) && (mf->dinfo != NULL) && (strlen(mf->dinfo->pci.ib_devs[0]) > 0)) {
+        snprintf(buf, 32, "%s", mf->dinfo->pci.ib_devs[0]);
+    } else {
+        *buf = '\0';
+    }
 }
 
 unsigned char mset_i2c_slave(mfile* mf, unsigned char new_i2c_slave)
@@ -224,14 +257,14 @@ int mwrite_buffer(mfile* mf, unsigned int offset, u_int8_t* data, int byte_len)
     return mwrite_buffer_ul(mf, offset, data, byte_len);
 }
 
-int maccess_reg(mfile* mf,
-                u_int16_t reg_id,
+int maccess_reg(mfile              * mf,
+                u_int16_t            reg_id,
                 maccess_reg_method_t reg_method,
-                void* reg_data,
-                u_int32_t reg_size,
-                u_int32_t r_size_reg,
-                u_int32_t w_size_reg,
-                int* reg_status)
+                void               * reg_data,
+                u_int32_t            reg_size,
+                u_int32_t            r_size_reg,
+                u_int32_t            w_size_reg,
+                int                * reg_status)
 {
     return maccess_reg_ul(mf, reg_id, reg_method, reg_data, reg_size, r_size_reg, w_size_reg, reg_status);
 }
@@ -248,7 +281,7 @@ int supports_reg_access_gmp(mfile* mf, maccess_reg_method_t reg_method)
 
 int mget_vsec_supp(mfile* mf)
 {
-    return mf->vsec_supp;
+    return mf->functional_vsec_supp;
 }
 
 MTCR_API int mget_addr_space(mfile* mf)
@@ -258,22 +291,21 @@ MTCR_API int mget_addr_space(mfile* mf)
 
 MTCR_API int mset_addr_space(mfile* mf, int space)
 {
-    if (space < 0 || space >= AS_END)
-    {
+    if ((space < 0) || (space >= AS_END)) {
         return -1;
     }
-    if (VSEC_SUPPORTED_UL(mf) && (mf->vsec_cap_mask & (1 << space_to_cap_offset(space))))
-    {
+    if (VSEC_SUPPORTED_UL(mf) && (mf->vsec_cap_mask & (1 << space_to_cap_offset(space)))) {
         mf->address_space = space;
+        /* printf("VSC address space was set successfully to: %d\n", mf->address_space); */
         return 0;
     }
+    /* printf("failed to set VSC address space to: %d. mf->address_space = %d\n", space, mf->address_space); */
     return -1;
 }
 
 int mget_mdevs_flags(mfile* mf, u_int32_t* devs_flags)
 {
-    if (mf == NULL || devs_flags == NULL)
-    {
+    if ((mf == NULL) || (devs_flags == NULL)) {
         errno = EINVAL;
         return 1;
     }
@@ -284,8 +316,7 @@ int mget_mdevs_flags(mfile* mf, u_int32_t* devs_flags)
 
 int mget_mdevs_type(mfile* mf, u_int32_t* mtype)
 {
-    if (mf == NULL || mtype == NULL)
-    {
+    if ((mf == NULL) || (mtype == NULL)) {
         errno = EINVAL;
         return 1;
     }

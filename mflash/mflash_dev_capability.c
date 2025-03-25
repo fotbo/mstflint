@@ -40,6 +40,7 @@
  */
 
 #include "mflash_dev_capability.h"
+#include <stdlib.h>
 
 // When (*status != MFE_OK) return value is undefined
 int is_four_byte_address_needed(mflash* mfl, MfError* status)
@@ -70,6 +71,7 @@ int is_four_byte_address_needed(mflash* mfl, MfError* status)
         case DeviceSpectrum3:
         case DeviceQuantum2:
         case DeviceQuantum3:
+        case DeviceArcusE:
         case DeviceSpectrum4:
         case DeviceBlueField2:
         case DeviceBlueField3:
@@ -95,7 +97,8 @@ int is_flash_enable_needed(mflash* mfl, MfError* status)
         return 1;
     }
     else if ((mfl->dm_dev_id == DeviceSecureHost) || (dm_is_5th_gen_hca(mfl->dm_dev_id)) ||
-             (dm_dev_is_gearbox(mfl->dm_dev_id)) || (dm_is_new_gen_switch(mfl->dm_dev_id)))
+             (dm_dev_is_gearbox(mfl->dm_dev_id)) || (dm_is_new_gen_switch(mfl->dm_dev_id)) ||
+             (dm_dev_is_retimer(mfl->dm_dev_id)))
     {
         return 0;
     }
@@ -138,6 +141,7 @@ int is_icmdif_supported(mflash* mfl, MfError* status)
             return 1;
         case DeviceQuantum2:
         case DeviceQuantum3:
+        case DeviceArcusE:
         case DeviceSpectrum4:
         case DeviceConnectX7:
         case DeviceConnectX8:
@@ -167,6 +171,7 @@ FlashGen get_flash_gen(mflash* mfl)
             break;
         }
         case DeviceQuantum3:
+        case DeviceArcusE:
         case DeviceConnectX8:
         case DeviceBlueField4:
         {

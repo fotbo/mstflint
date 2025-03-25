@@ -306,6 +306,7 @@ private:
                          char* delimeter,
                          bool isCSV);
     FlintStatus QueryLinkX(string deviceName, string outputFile, std::vector<int> deviceIds);
+    void PrintLifeCycle(const life_cycle_t& lifeCycle);
 
 public:
     QuerySubCommand();
@@ -322,6 +323,9 @@ public:
     FlintStatus executeCommand() override;
     bool verifyParams() override;
     FlintStatus querySyncE();
+    FlintStatus QueryCertStatus();
+private:
+    FwComponent::comps_ids_t _comp;
 };
 
 class Extract4MBImageSubCommand : public SubCommand
@@ -585,6 +589,7 @@ class HwSubCommand : public SubCommand
 {
 private:
     FlintStatus printAttr(const ext_flash_attr_t& attr);
+    bool PrintWriteProtectedBits(const ext_flash_attr_t& attr);
 
 public:
     HwSubCommand();

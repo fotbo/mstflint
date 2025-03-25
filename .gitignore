@@ -1,5 +1,6 @@
 *.a
 *.o
+*.la
 *.lo
 *.so
 .deps/
@@ -27,7 +28,8 @@ libtool
 /mlxconfig/mstprivhost
 /mstdump/crd_main/mstregdump
 /mstflint.spec
-/resourcedump/mstresourcedump
+/resourcetools/mstresourcedump
+/resourcetools/mstresourceparse
 /small_utils/mstcongestion
 /small_utils/mstfwreset
 /small_utils/mstmcra

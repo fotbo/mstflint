@@ -109,10 +109,38 @@ struct CAP_VALUE
 
 struct PRM_FIELD
 {
+    PRM_FIELD()
+    {
+        prmField = "";
+        uiField = "";
+        fieldAccess = 0;
+        isSigned = false;
+        validationMask = 0;
+    }
+
+    PRM_FIELD(string _prmField, string _uiField, u_int32_t _fieldAccess, bool _isSigned)
+    {
+        prmField = _prmField;
+        uiField = _uiField;
+        fieldAccess = _fieldAccess;
+        isSigned = _isSigned;
+        validationMask = 0;
+    }
+
+    PRM_FIELD(string _prmField, string _uiField, u_int32_t _fieldAccess, bool _isSigned, u_int32_t _validationMask)
+    {
+        prmField = _prmField;
+        uiField = _uiField;
+        fieldAccess = _fieldAccess;
+        isSigned = _isSigned;
+        validationMask = _validationMask;
+    }
+
     string prmField;
     string uiField;
     u_int32_t fieldAccess;
     bool isSigned;
+    u_int32_t validationMask;
 };
 
 class MlxlinkMaps
@@ -126,11 +154,14 @@ private:
     void ethSpeedMapping();
     void extEthSpeedMapping();
     void ibSpeedMapping();
+    void nvlinkSpeedMapping();
     void speedToLanesMapping();
     void initPortSpeedMapping();
+    void initPpcntGroupsMapping();
     void initPrbsMapping();
     void initPpbmcAndPepcMapping();
     void initLinkDownInfoMapping();
+    void initLinkUpInfo();
     void initSltpStatusMapping();
     void qsfpComlianceMapping();
     void cmisIbComlianceMapping();
@@ -161,6 +192,10 @@ private:
     void portStateMapping();
     void techMapping();
     void pcieEnumMapping();
+    void initEnhancedDebugMapping();
+    void initPprmOperationRecoveryMapping();
+    void initPpttParamsMapping();
+    void initPpttSpeedMapping();
 
 public:
     static MlxlinkMaps* getInstance();
@@ -200,6 +235,7 @@ public:
     std::map<u_int32_t, std::string> _moduleRxAmpCap;
     std::map<u_int32_t, std::string> _pepcStatus;
     std::map<u_int32_t, string> _IBSpeed2Str;
+    std::map<u_int32_t, string> _NVLINKSpeed2Str;
     std::map<u_int32_t, string> _EthExtSpeed2Str;
     std::map<u_int32_t, u_int32_t> _IBSpeed2gNum;
     std::map<u_int32_t, u_int32_t> _ETHSpeed2gNum;
@@ -213,6 +249,7 @@ public:
     std::map<u_int32_t, PRM_FIELD> _SltpEdrParams;
     std::map<u_int32_t, PRM_FIELD> _SltpHdrParams;
     std::map<u_int32_t, PRM_FIELD> _SltpNdrParams;
+    std::map<u_int32_t, PRM_FIELD> _SltpXdrParams;
     std::map<u_int32_t, std::string> _ethANFsmState;
     std::map<u_int32_t, std::string> _fecModeActive;
     std::map<u_int32_t, pair<string, string>> _fecModeMask;
@@ -278,8 +315,13 @@ public:
     std::map<u_int32_t, std::string> _aeState;
     std::map<u_int32_t, std::string> _pllUglState;
     std::map<u_int32_t, std::string> _slrgFomMode;
+    std::map<u_int32_t, std::string> _slrgFomMode5nm;
     std::map<u_int32_t, std::string> _pcieDevStatus;
     std::map<u_int32_t, PcieErrType> _pcieErrType;
+    std::map<u_int32_t, std::string> _pprmOperRecovery;
+    std::map<u_int32_t, u_int32_t> _ppcntGroups;
+    std::map<u_int32_t, PRM_FIELD> _ppttParams;
+    std::map<u_int32_t, u_int32_t> _ppttSpeedMapping;
 
     string _sltpHeader;
     string _showErrorsTitle;

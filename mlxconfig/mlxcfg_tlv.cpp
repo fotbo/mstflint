@@ -41,18 +41,18 @@
 #include <signal.h>
 #include <stdio.h>
 #include <iomanip>
+#include <algorithm>
 
 #include <compatibility.h>
 #include <mlxcfg_db_manager.h>
-
 #include <tools_layouts/tools_open_layouts.h>
 #include <tools_layouts/reg_access_hca_layouts.h>
+#include <mft_utils.h>
 #include "mlxcfg_tlv.h"
 
 #include <muParser.h>
 
 using namespace mu;
-
 using namespace std;
 
 #define TLV_NAME_HEADER "name"
@@ -171,13 +171,19 @@ TLVConf::TLVConf(int columnsCount, char** dataRow, char** headerRow) :
     _attrs[WRITER_ID_ATTR] = numToStr(WRITER_ID_UNSPECIFIED);
     _attrs[OVR_EN_ATTR] = "1";
     _attrs[RD_EN_ATTR] = "1";
+    _attrs[PRIORITY_ATTR] = "MLNX";
 
     _buff.resize(_size, 0);
+
+    _isReadOnly = false;
 }
 
 TLVConf::~TLVConf()
 {
-    VECTOR_ITERATOR(std::shared_ptr<Param>, this->_params, param) { param->reset(); }
+    VECTOR_ITERATOR(std::shared_ptr<Param>, this->_params, param)
+    {
+        param->reset();
+    }
 }
 
 int TLVConf::getMaxPort(mfile* mf)
@@ -205,23 +211,23 @@ int TLVConf::getMaxModule()
 
 void TLVConf::CheckModuleAndPortMatchClass(int32_t module, u_int32_t port, string mlxconfigName)
 {
-    if (module != -1 && !this->isModuleTargetClass())
+    if ((module != -1) && !this->isModuleTargetClass())
     {
         string error = mlxconfigName + " doesn't have a module";
         throw MlxcfgException(error.c_str());
     }
-    else if (module == -1 && this->isModuleTargetClass())
+    else if ((module == -1) && this->isModuleTargetClass())
     {
         string error = mlxconfigName + " with no module does not exist";
         throw MlxcfgException(error.c_str());
     }
 
-    if (port != 0 && !this->isPortTargetClass())
+    if ((port != 0) && !this->isPortTargetClass())
     {
         string error = mlxconfigName + " doesn't have a physical port";
         throw MlxcfgException(error.c_str());
     }
-    else if (port == 0 && this->isPortTargetClass())
+    else if ((port == 0) && this->isPortTargetClass())
     {
         string error = mlxconfigName + " with no port does not exist";
         throw MlxcfgException(error.c_str());
@@ -283,7 +289,7 @@ bool TLVConf::isMlxconfigSupported()
 }
 
 // This function checks if the FW knows the TLV.
-bool TLVConf::isFWSupported(mfile* mf, bool read_write)
+bool TLVConf::isFWSupported(mfile* mf, bool isWriteOperation)
 {
     bool suppRead = false, suppWrite = false;
     // printf("-D- tlv=%s\n", _name.c_str());
@@ -297,12 +303,16 @@ bool TLVConf::isFWSupported(mfile* mf, bool read_write)
     // FW only support to return EXP_ROM TLV version through NVQC register
     if (_target != EXP_ROM)
     {
+        if (suppRead && !suppWrite)
+        {
+            _isReadOnly = true;
+        }
         if (!suppRead)
         {
             return false;
         }
 
-        if (read_write && !suppWrite)
+        if (isWriteOperation && !suppWrite)
         {
             return false;
         }
@@ -312,12 +322,18 @@ bool TLVConf::isFWSupported(mfile* mf, bool read_write)
 
 void TLVConf::unpack(u_int8_t* buff)
 {
-    VECTOR_ITERATOR(std::shared_ptr<Param>, _params, p) { (*p)->unpack(buff); }
+    VECTOR_ITERATOR(std::shared_ptr<Param>, _params, p)
+    {
+        (*p)->unpack(buff);
+    }
 }
 
 void TLVConf::pack(u_int8_t* buff)
 {
-    VECTOR_ITERATOR(std::shared_ptr<Param>, _params, p) { (*p)->pack(buff); }
+    VECTOR_ITERATOR(std::shared_ptr<Param>, _params, p)
+    {
+        (*p)->pack(buff);
+    }
 }
 
 void TLVConf::invalidate(mfile* mf)
@@ -394,13 +410,13 @@ u_int32_t TLVConf::getPerHostFunctionTypeBe()
 
     memset(&type, 0, sizeof(struct tools_open_per_host_type));
 
-    if (host == ALL_ATTR_VAL && func == ALL_ATTR_VAL)
+    if ((host == ALL_ATTR_VAL) && (func == ALL_ATTR_VAL))
     {
         type.param_class = All_Hosts_All_Functions;
         type.function = 0;
         type.host = 0;
     }
-    else if (host == ALL_ATTR_VAL && func != ALL_ATTR_VAL)
+    else if ((host == ALL_ATTR_VAL) && (func != ALL_ATTR_VAL))
     {
         type.param_class = All_Hosts_Per_Function;
         type.host = 0;
@@ -410,7 +426,7 @@ u_int32_t TLVConf::getPerHostFunctionTypeBe()
         }
         type.function = num;
     }
-    else if (host != ALL_ATTR_VAL && func == ALL_ATTR_VAL)
+    else if ((host != ALL_ATTR_VAL) && (func == ALL_ATTR_VAL))
     {
         type.param_class = Per_Host_All_Functions;
         type.function = 0;
@@ -420,7 +436,7 @@ u_int32_t TLVConf::getPerHostFunctionTypeBe()
         }
         type.host = num;
     }
-    else if (host != ALL_ATTR_VAL && func != ALL_ATTR_VAL)
+    else if ((host != ALL_ATTR_VAL) && (func != ALL_ATTR_VAL))
     {
         type.param_class = Per_Host_Per_Function;
         if (!strToNum(_attrs[HOST_ATTR], num))
@@ -477,7 +493,7 @@ std::shared_ptr<Param> TLVConf::getValidBitParam(string n)
     {
         throw MlxcfgException("The valid bit %s in the tlv %s was not found\n", n.c_str(), _name.c_str());
     }
-    if (vP->_type != UNSIGNED && vP->_type != INTEGER && vP->_type != ENUM && vP->_type != BOOLEAN_TYPE)
+    if ((vP->_type != UNSIGNED) && (vP->_type != INTEGER) && (vP->_type != ENUM) && (vP->_type != BOOLEAN_TYPE))
     {
         throw MlxcfgException("The valid bit %s is of invalid type", n.c_str());
     }
@@ -504,7 +520,7 @@ void TLVConf::mnva(mfile* mf, u_int8_t* buff, u_int16_t len, u_int32_t type, reg
     if (mRc)
     {
         // Todo: ask for this check:
-        if (mRc != ME_REG_ACCESS_RES_NOT_AVLBL || isSet)
+        if ((mRc != ME_REG_ACCESS_RES_NOT_AVLBL) || isSet)
         {
             throw MlxcfgException("Failed to %s %s settings %s", isSet ? "set" : "get", _name.c_str(), m_err2str(mRc));
         }
@@ -548,7 +564,7 @@ vector<pair<ParamView, string> > TLVConf::query(mfile* mf, QueryType qT)
         std::shared_ptr<Param> p = *(it);
         p->_port = this->_port;
         p->_module = this->_module;
-        if (this->isPortTargetClass() && p->_mlxconfigName != "")
+        if (this->isPortTargetClass() && (p->_mlxconfigName != ""))
         {
             auto namePortTuple = MlxcfgDBManager::splitMlxcfgNameAndPortOrModule(p->_mlxconfigName, PORT, mf);
             if (get<1>(namePortTuple) != 0)
@@ -557,7 +573,7 @@ vector<pair<ParamView, string> > TLVConf::query(mfile* mf, QueryType qT)
             }
             p->_mlxconfigName += "_P" + to_string(p->_port);
         }
-        else if (this->isModuleTargetClass() && p->_mlxconfigName != "")
+        else if (this->isModuleTargetClass() && (p->_mlxconfigName != ""))
         {
             auto nameModuleTuple = MlxcfgDBManager::splitMlxcfgNameAndPortOrModule(p->_mlxconfigName, MODULE, mf);
             if (get<1>(nameModuleTuple) != -1)
@@ -575,7 +591,7 @@ vector<pair<ParamView, string> > TLVConf::query(mfile* mf, QueryType qT)
             }
             p->unpack(defaultBuff.data());
         }
-        if (p->_mlxconfigName.empty() || p->_supportedFromVersion > _maxTlvVersionSuppByFw)
+        if (p->_mlxconfigName.empty() || (p->_supportedFromVersion > _maxTlvVersionSuppByFw))
         {
             continue;
         }
@@ -757,7 +773,7 @@ std::shared_ptr<Param> TLVConf::findParamByMlxconfigNamePortModule(string mlxcon
 {
     VECTOR_ITERATOR(std::shared_ptr<Param>, _params, it)
     {
-        if (mlxconfigname == (*it)->_mlxconfigName && port == (*it)->_port && module == (*it)->_module)
+        if ((mlxconfigname == (*it)->_mlxconfigName) && (port == (*it)->_port) && (module == (*it)->_module))
         {
             return *it;
         }
@@ -819,7 +835,7 @@ void TLVConf::getExprVarsValues(vector<string>& vars,
     {
         string var = *i;
         // TODO: make sure: assume temp var starts with '_'
-        if ((var[0] != '_' /*&& !isTempVarsExpr*/) && var2ValMap.find(var) == var2ValMap.end())
+        if ((var[0] != '_' /*&& !isTempVarsExpr*/) && (var2ValMap.find(var) == var2ValMap.end()))
         {
             size_t pos = var.find('.');
             if (pos == string::npos)
@@ -872,7 +888,7 @@ void substituteVarsValues(string orgExpr,
                 var += orgExpr[j];
                 j++;
             }
-            if (var[0] == '_' && isTempVars)
+            if ((var[0] == '_') && isTempVars)
             {
                 tempVar = var.substr(1);
                 expr += tempVar;
@@ -1032,7 +1048,7 @@ void TLVConf::genXMLTemplate(string& xmlTemplate, bool allAttrs, bool withVal, b
     {
         attrs[MODULE_ATTR] = defaultAttrVal ? ALL_ATTR_VAL : _attrs[MODULE_ATTR];
     }
-    else if (_tlvClass == Per_Host_Per_Function && allAttrs)
+    else if ((_tlvClass == Per_Host_Per_Function) && allAttrs)
     {
         attrs[HOST_ATTR] = defaultAttrVal ? ALL_ATTR_VAL : _attrs[HOST_ATTR];
         attrs[FUNC_ATTR] = defaultAttrVal ? ALL_ATTR_VAL : _attrs[FUNC_ATTR];
@@ -1042,11 +1058,15 @@ void TLVConf::genXMLTemplate(string& xmlTemplate, bool allAttrs, bool withVal, b
     {
         attrs[OVR_EN_ATTR] = defaultAttrVal ? "1" : _attrs[OVR_EN_ATTR];
         attrs[RD_EN_ATTR] = defaultAttrVal ? "1" : _attrs[RD_EN_ATTR];
+        attrs[PRIORITY_ATTR] = defaultAttrVal ? MLNX_PRIORITY_ATTR : _attrs[PRIORITY_ATTR];
         attrs[WRITER_ID_ATTR] = defaultAttrVal ? numToStr(WRITER_ID_UNSPECIFIED) : _attrs[WRITER_ID_ATTR];
     }
 
     xmlTemplate = "<" + _name;
-    MAP_ITERATOR(string, string, attrs, it) { xmlTemplate += " " + it->first + "='" + it->second + "'"; }
+    MAP_ITERATOR(string, string, attrs, it)
+    {
+        xmlTemplate += " " + it->first + "='" + it->second + "'";
+    }
     xmlTemplate += ">\n\n";
 
     VECTOR_ITERATOR(std::shared_ptr<Param>, _params, it)
@@ -1054,7 +1074,10 @@ void TLVConf::genXMLTemplate(string& xmlTemplate, bool allAttrs, bool withVal, b
         string paramXMLTemplate;
         (*it)->genXMLTemplate(paramXMLTemplate, withVal);
         vector<string> lines = splitStr(paramXMLTemplate, '\n');
-        VECTOR_ITERATOR(string, lines, line) { xmlTemplate += "\t" + *line + "\n"; }
+        VECTOR_ITERATOR(string, lines, line)
+        {
+            xmlTemplate += "\t" + *line + "\n";
+        }
         xmlTemplate += "\n";
     }
 
@@ -1153,9 +1176,41 @@ void TLVConf::genRaw(string& raw)
     raw = buffSS.str();
 }
 
+int PriorityStrToNum(string priority)
+{
+    if (priority == USER_PRIORITY_ATTR)
+    {
+        return 0;
+    }
+    if (priority == OEM_PRIORITY_ATTR)
+    {
+        return 1;
+    }
+    if (priority == MLNX_PRIORITY_ATTR)
+    {
+        return 3;
+    }
+    return -1;
+}
+string PriorityNumToStr(u_int8_t priority)
+{
+    switch (priority)
+    {
+        case 0:
+            return USER_PRIORITY_ATTR;
+        case 1:
+            return OEM_PRIORITY_ATTR;
+        case 3:
+            return MLNX_PRIORITY_ATTR;
+        default:
+            return "ERROR";
+    }
+}
+
 void TLVConf::genBin(vector<u_int32_t>& buff, bool withHeader)
 {
-    u_int32_t writer_id, rd_en, ovr_en;
+    u_int32_t writer_id = 0, rd_en = 0, ovr_en = 0;
+    int priority;
     tools_open_nv_hdr_fifth_gen hdr;
 
     if (withHeader)
@@ -1184,6 +1239,12 @@ void TLVConf::genBin(vector<u_int32_t>& buff, bool withHeader)
             throw MlxcfgException("Illegal value for " OVR_EN_ATTR);
         }
         hdr.over_en = (u_int8_t)ovr_en;
+        priority = PriorityStrToNum(_attrs[PRIORITY_ATTR]);
+        if (priority < 0)
+        {
+            throw MlxcfgException("%s is Illegal value for %s", _attrs[PRIORITY_ATTR].c_str(), PRIORITY_ATTR);
+        }
+        hdr.priority = (u_int8_t)priority;
 
         hdr.type.tlv_type_dw.tlv_type_dw = __be32_to_cpu(getTlvTypeBe());
 

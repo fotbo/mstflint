@@ -54,6 +54,10 @@
 #define MODULE_ATTR "module"
 #define OVR_EN_ATTR "ovr_en"
 #define RD_EN_ATTR "rd_en"
+#define PRIORITY_ATTR "priority"
+#define USER_PRIORITY_ATTR "USER"
+#define OEM_PRIORITY_ATTR "OEM"
+#define MLNX_PRIORITY_ATTR "MLNX"
 #define WRITER_ID_ATTR "writer_id"
 #define HOST_ATTR "host"
 #define FUNC_ATTR "function"
@@ -111,12 +115,13 @@ public:
     map<string, string> _attrs;
     vector<u_int8_t> _buff;
     u_int32_t _maxTlvVersionSuppByFw;
+    bool _isReadOnly;
 
     TLVConf(int columnsCount, char** dataRow, char** headerRow);
     ~TLVConf();
     bool isMlxconfigSupported();
     void getView(TLVConfView& tlvConfView, mfile* mf);
-    bool isFWSupported(mfile* mf, bool read_write);
+    bool isFWSupported(mfile* mf, bool isWriteOperation);
     std::shared_ptr<Param> getValidBitParam(std::string n);
     bool checkParamValidBit(std::shared_ptr<Param> p);
     std::vector<std::pair<ParamView, std::string>> query(mfile* mf, QueryType qT);
@@ -152,5 +157,8 @@ public:
     void invalidate(mfile* mf);
     static void unpackTLVType(TLVClass tlvClass, tools_open_tlv_type& type, u_int32_t& id);
 };
+
+int PriorityStrToNum(string priority);
+string PriorityNumToStr(u_int8_t priority);
 
 #endif /* MLXCFG_TLV_H_ */

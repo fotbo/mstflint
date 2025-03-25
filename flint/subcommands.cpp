@@ -42,12 +42,18 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <iomanip>
+#include <sys/stat.h>
+#include <map>
+#include <bitset>
 
 #include "mtcr.h"
+#include "mlxfwops/lib/components/fs_cert_ops.h"
 #include <common/compatibility.h>
 #include <fw_comps_mgr/fw_comps_mgr.h>
 #include <mlxfwops/lib/fw_version.h>
 #include "mlxfwops/lib/components/fs_synce_ops.h"
+#include "hex64.h"
 
 #ifndef NO_ZLIB
 #include <zlib.h>
@@ -60,6 +66,7 @@
 #define MODULUS_SIZE 512
 #define TOTAL_PUBLIC_KEY_SIZE 532
 #define MODULUS_OFFSET 38
+#define BP_SIZE 4
 
 #if !defined(__WIN__) && !defined(__DJGPP__) && !defined(UEFI_BUILD) && defined(HAVE_TERMIOS_H)
 // used in mygetchar
@@ -107,7 +114,18 @@ void close_log()
     return;
 }
 
-static const char* life_cycle_strings[NUM_OF_LIFE_CYCLES] = {"PRODUCTION", "GA SECURED", "GA NON SECURED", "RMA"};
+static const map<LifeCycleFS4, const char*> life_cycle_fs4_strings = {{FS4_LC_PRODUCTION, "PRODUCTION"},
+                                                                      {FS4_LC_GA_SECURED, "GA SECURED"},
+                                                                      {FS4_LC_GA_NON_SECURED, "GA NON SECURED"},
+                                                                      {FS4_LC_RMA, "RMA"}};
+// To keep BWC we translate new life cycle definitions (FS5) to legacy (FS4):
+// 'BLANK CHIP' -> 'PRODUCTION'
+// 'PRODUCTION' -> 'GA SECURED'
+// 'FAILURE ANALYSIS' -> 'RMA'
+static const map<LifeCycleFS5, const char*> life_cycle_fs5_strings = {{FS5_LC_BLANK_CHIP, "PRODUCTION"},
+                                                                      {FS5_LC_PRE_PRODUCTION, "PRE PRODUCTION"},
+                                                                      {FS5_LC_PRODUCTION, "GA SECURED"},
+                                                                      {FS5_LC_FAILURE_ANALYSIS, "RMA"}};
 
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
 
@@ -1610,6 +1628,10 @@ const char* SubCommand::fwImgTypeToStr(u_int8_t fwImgType)
             return "FSCTRL";
             break;
 
+        case FIT_COMPS:
+            return "COMPS";
+            break;
+
         default:
             return "Unknown";
             break;
@@ -1653,7 +1675,7 @@ FlintStatus Extract4MBImageSubCommand::executeCommand()
         return FLINT_FAILED;
     }
 
-    if (!_imgOps->FwExtract4MBImage(img, true))
+    if (!_imgOps->FwExtract4MBImage(img, true, false, false, _flintParams.imageSizeOnly))
     {
         reportErr(true, "Extracting FW Data failed: %s.\n", _imgOps->err());
         return FLINT_FAILED;
@@ -1733,8 +1755,7 @@ SignSubCommand::SignSubCommand()
     _flagLong = "sign";
     _flagShort = "";
     _paramExp = "None";
-    _example = FLINT_NAME " -i fw_image.bin [--private_key file.pem --key_uuid uuid_string] OR [--openssl_engine "
-                          "engine --openssl_key_id identifier --key_uuid uuid_string] sign";
+    _example = FLINT_NAME " -i fw_image.bin [--private_key file.pem --key_uuid uuid_string] sign";
     _v = Wtv_Img;
     _maxCmdParamNum = 0;
     _cmdType = SC_Sign;
@@ -1753,28 +1774,6 @@ FlintStatus SignSubCommand::executeCommand()
         reportErr(true, IMAGE_SIGN_TYPE_ERROR);
         return FLINT_FAILED;
     }
-    if (_flintParams.openssl_engine_usage_specified)
-    {
-#if !defined(NO_OPEN_SSL) && !defined(NO_DYNAMIC_ENGINE)
-        //* Init Signer
-        MlxSign::MlxSignRSAViaHSM signer(_flintParams.openssl_engine, _flintParams.openssl_key_id);
-        int rc = signer.Init();
-        if (rc)
-        {
-            reportErr(true, "Open SSL dynamic engine functionality is not supported.\n");
-            return FLINT_FAILED;
-        }
-
-        if (!_imgOps->SignForFwUpdate(_flintParams.privkey_uuid.c_str(), signer, MlxSign::SHA512, &verifyCbFunc))
-        {
-            reportErr(true, FLINT_SIGN_ERROR, _imgOps->err());
-            return FLINT_FAILED;
-        }
-#else
-        reportErr(true, "Open SSL functionality is not supported.\n");
-        return FLINT_FAILED;
-#endif
-    }
     else if (!_flintParams.privkey_file.empty() && !_flintParams.privkey_uuid.empty())
     {
         if (_flintParams.privkey2_specified && _flintParams.uuid2_specified)
@@ -1791,7 +1790,7 @@ FlintStatus SignSubCommand::executeCommand()
         }
         else
         {
-#if !defined(NO_OPEN_SSL) && !defined(NO_DYNAMIC_ENGINE)
+#if !defined(NO_OPEN_SSL)
             //* Init Signer
             MlxSign::MlxSignRSAViaOpenssl signer(_flintParams.privkey_file.c_str());
             int rc = signer.Init();
@@ -1824,58 +1823,32 @@ FlintStatus SignSubCommand::executeCommand()
 
 bool SignSubCommand::verifyParams()
 {
-    if (_flintParams.openssl_engine_usage_specified)
+    if (_flintParams.privkey_file.empty() != _flintParams.privkey_uuid.empty())
     {
-        if (_flintParams.privkey_uuid.empty())
-        {
-            reportErr(true, "To Sign the image with OpenSSL you must provide UUID string.\n");
-            return false;
-        }
-        if (_flintParams.openssl_engine.empty() || _flintParams.openssl_key_id.empty())
-        {
-            reportErr(true, "To Sign the image with OpenSSL you must provide the engine and the key identifier.\n");
-            return false;
-        }
-        if (_flintParams.openssl_key_id.find("type=public", 0) != std::string::npos)
-        {
-            reportErr(true, "The Sign command with --openssl_key_id flag does not accept public keys\n");
-            return false;
-        }
-        if (!_flintParams.privkey_file.empty())
-        {
-            reportErr(true, "The Sign command does not accept --private_key flag with the following flags: "
-                            "--openssl_engine, --openssl_key_id\n");
-            return false;
-        }
+        reportErr(true, "To Sign the image with RSA you must provide "
+                        "private key and uuid.\n");
+        return false;
     }
-    else
+
+    if (_flintParams.privkey_file.empty() && _flintParams.privkey2_specified)
     {
-        if (_flintParams.privkey_file.empty() != _flintParams.privkey_uuid.empty())
-        {
-            reportErr(true, "To Sign the image with RSA you must provide "
-                            "private key and uuid.\n");
-            return false;
-        }
-
-        if (_flintParams.privkey_file.empty() && _flintParams.privkey2_specified)
-        {
-            reportErr(true, "Use --private_key if you want to sign with only one key.\n");
-            return false;
-        }
-
-        if (_flintParams.privkey2_specified != _flintParams.uuid2_specified)
-        {
-            reportErr(true, "To Sign the image with two RSA keys you must provide "
-                            "two private keys and two uuid.\n");
-            return false;
-        }
-
-        if (_flintParams.cmd_params.size() > 0)
-        {
-            reportErr(true, FLINT_CMD_ARGS_ERROR, _name.c_str(), 1, (int)_flintParams.cmd_params.size());
-            return false;
-        }
+        reportErr(true, "Use --private_key if you want to sign with only one key.\n");
+        return false;
     }
+
+    if (_flintParams.privkey2_specified != _flintParams.uuid2_specified)
+    {
+        reportErr(true, "To Sign the image with two RSA keys you must provide "
+                        "two private keys and two uuid.\n");
+        return false;
+    }
+
+    if (_flintParams.cmd_params.size() > 0)
+    {
+        reportErr(true, FLINT_CMD_ARGS_ERROR, _name.c_str(), 1, (int)_flintParams.cmd_params.size());
+        return false;
+    }
+
     return true;
 }
 
@@ -2230,20 +2203,7 @@ unique_ptr<MlxSign::Signer> SignRSASubCommand::createSigner()
 {
     unique_ptr<MlxSign::Signer> signer = nullptr;
 #if !defined(UEFI_BUILD) && !defined(NO_OPEN_SSL)
-    if (_flintParams.openssl_engine_usage_specified)
-    {
-#if !defined(NO_DYNAMIC_ENGINE)
-        //* Init openssl engine for signing
-        signer = unique_ptr<MlxSign::Signer>(
-          new MlxSign::MlxSignRSAViaHSM(_flintParams.openssl_engine, _flintParams.openssl_key_id));
-#else
-        reportErr(true, "Open SSL functionality is not supported.\n");
-#endif
-    }
-    else
-    {
-        signer = unique_ptr<MlxSign::Signer>(new MlxSign::MlxSignRSAViaOpenssl(_flintParams.privkey_file.c_str()));
-    }
+    signer = unique_ptr<MlxSign::Signer>(new MlxSign::MlxSignRSAViaOpenssl(_flintParams.privkey_file.c_str()));
 #else
     reportErr(true, "RSA sign is not supported.\n");
 #endif
@@ -2317,40 +2277,17 @@ bool SignRSASubCommand::verifyParams()
         return false;
     }
 
-    if (_flintParams.openssl_engine_usage_specified)
+    if (_flintParams.privkey_file.empty())
     {
-        if (_flintParams.openssl_engine.empty() || _flintParams.openssl_key_id.empty())
-        {
-            reportErr(true, "To use OpenSSL engine you must provide the engine and the key identifier.\n");
-            return false;
-        }
-        if (_flintParams.openssl_key_id.find("type=public", 0) != std::string::npos)
-        {
-            reportErr(true, "The %s command with --openssl_key_id flag does not accept public keys\n", _name.c_str());
-            return false;
-        }
-        if (!_flintParams.privkey_file.empty())
-        {
-            reportErr(true,
-                      "The %s command does not accept --private_key flag with the following flags: "
-                      "--openssl_engine, --openssl_key_id\n",
-                      _name.c_str());
-            return false;
-        }
+        reportErr(true, "To sign the image with RSA you must provide private key.\n");
+        return false;
     }
-    else
+    else if (!is_file_exists(_flintParams.privkey_file.c_str()))
     {
-        if (_flintParams.privkey_file.empty())
-        {
-            reportErr(true, "To sign the image with RSA you must provide private key.\n");
-            return false;
-        }
-        else if (!is_file_exists(_flintParams.privkey_file.c_str()))
-        {
-            reportErr(true, SIGN_PRIVATE_KEY_NOT_FOUND, _flintParams.privkey_file.c_str());
-            return false;
-        }
+        reportErr(true, SIGN_PRIVATE_KEY_NOT_FOUND, _flintParams.privkey_file.c_str());
+        return false;
     }
+   
     return true;
 }
 
@@ -2510,6 +2447,13 @@ bool BurnSubCommand::verifyParams()
             if (!is_file_exists(image.c_str()))
             {
                 reportErr(true, "The supplied image for cables burn doesn't exist.\n");
+                return false;
+            }
+            struct stat st;
+            int status = stat(image.c_str(), &st);
+            if (status != 0 || S_ISREG(st.st_mode) == 0)
+            {
+                reportErr(true, "The supplied image path is not a file.\n");
                 return false;
             }
             long fileSize = 0;
@@ -2778,7 +2722,7 @@ FlintStatus BurnSubCommand::burnFs3()
     }
 
     // Here we want to burn FS3 device so we check if the image is indeed FS3 image
-    if (_imgInfo.fw_type != FIT_FS3 && _imgInfo.fw_type != FIT_FS4)
+    if (_imgInfo.fw_type != FIT_FS3 && _imgInfo.fw_type != FIT_FS4 && _imgInfo.fw_type != FIT_FS5)
     {
         reportErr(true, FLINT_IMG_DEV_COMPAT_ERROR, "FS3", "FS3");
         return FLINT_FAILED;
@@ -3351,11 +3295,12 @@ FlintStatus BurnSubCommand::executeCommand()
 
     if (_imgOps->FwType() == FIT_COMPS)
     {
+        FsCompsOperations* compsOps = dynamic_cast<FsCompsOperations*>(_imgOps);
         if (_flintParams.yes)
         {
             _burnParams.ignoreVersionCheck = true;
         }
-        if (!_fwOps->FwBurnAdvanced(_imgOps, _burnParams, FwComponent::comps_ids_t::COMPID_CLOCK_SYNC_EEPROM))
+        if (!_fwOps->FwBurnAdvanced(_imgOps, _burnParams, compsOps->GetComponentID()))
         {
             reportErr(true, FLINT_FSX_BURN_ERROR, "FIT_COMPS", _fwOps->err());
             return FLINT_FAILED;
@@ -3363,7 +3308,11 @@ FlintStatus BurnSubCommand::executeCommand()
         else
         {
             cout << "-I- Component FW burn finished successfully." << endl;
-            cout << "-I- " << REBOOT_REQUIRED_STR << endl;
+            const char* resetRec = _imgOps->FwGetResetRecommandationStr();
+            if (resetRec)
+            {
+                printf("-I- %s\n", resetRec);
+            }
             return FLINT_SUCCESS;
         }
     }
@@ -3397,7 +3346,7 @@ FlintStatus BurnSubCommand::executeCommand()
         return FLINT_FAILED;
     }
 
-    if (device_encrypted != image_encrypted)
+    if (device_encrypted != image_encrypted && _fwType != FIT_FS5)
     {
         reportErr(true, "Burning %sencrypted image on %sencrypted device is not allowed.\n",
                   image_encrypted ? "" : "non-", device_encrypted ? "" : "non-");
@@ -3426,7 +3375,7 @@ FlintStatus BurnSubCommand::executeCommand()
         reportErr(true, "The \"--use_image_guids\" flag is supported only for GEN4 devices.\n");
         return FLINT_FAILED;
     }
-    if (_fwType == FIT_FS3 || _fwType == FIT_FS4 || _fwType == FIT_FSCTRL)
+    if (_fwType == FIT_FS3 || _fwType == FIT_FS4 || _fwType == FIT_FS5 || _fwType == FIT_FSCTRL)
     {
         u_int32_t devid = 0;
         mfile* mf = _fwOps->getMfileObj();
@@ -3620,7 +3569,7 @@ FlintStatus BurnSubCommand::burnMFA2LiveFish(dm_dev_id_t devid_t)
     bool NeedToSetMacManually = true;
     if (_fwOps->FwQuery(&_devInfo, true, false, true, false, (_flintParams.silent == false)))
     {
-        if (_devInfo.fs3_info.fs3_uids_info.valid_field == 1)
+        if (_devInfo.fs3_info.fs3_uids_info.guid_format == IMAGE_LAYOUT_UIDS)
         {
             base_guid.num_allocated = _devInfo.fs3_info.fs3_uids_info.image_layout_uids.base_guid.num_allocated;
             base_guid.num_allocated_msb = _devInfo.fs3_info.fs3_uids_info.image_layout_uids.base_guid.num_allocated_msb;
@@ -4040,6 +3989,19 @@ bool QuerySubCommand::displayFs2Uids(const fw_info_t& fwInfo)
     }                                                                             \
     printf("\n");
 
+static inline void printGuid(const std::string& label, uint64_t guid)
+{
+    printf("%-18s     %016" U64H_FMT_GEN "\n", label.c_str(), guid);
+}
+
+static inline void printPguidGuids(const multi_asic_guids_t* guids)
+{
+    printGuid("System GUID:", guids->sys_guid);
+    printGuid("Node GUID:", guids->node_guid);
+    printGuid("Port GUID:", guids->port_guid);
+    printGuid("Allocated GUID:", guids->allocated_guid);
+}
+
 static inline void
   printFs3OrNewerUids(struct fs3_uid_entry uid, struct fs3_uid_entry orig_uid, string guidMac, bool printStep)
 {
@@ -4074,7 +4036,7 @@ static inline void
 
 bool QuerySubCommand::displayFs3Uids(const fw_info_t& fwInfo)
 {
-    if (fwInfo.fs3_info.fs3_uids_info.valid_field)
+    if (fwInfo.fs3_info.fs3_uids_info.guid_format == IMAGE_LAYOUT_UIDS)
     {
         // new GUIDs format
         printf("Description:           UID                GuidsNumber\n");
@@ -4082,6 +4044,15 @@ bool QuerySubCommand::displayFs3Uids(const fw_info_t& fwInfo)
                             fwInfo.fs3_info.orig_fs3_uids_info.image_layout_uids.base_guid, "GUID", false);
         printFs4OrNewerUids(fwInfo.fs3_info.fs3_uids_info.image_layout_uids.base_mac,
                             fwInfo.fs3_info.orig_fs3_uids_info.image_layout_uids.base_mac, "MAC", false);
+    }
+    else if (fwInfo.fs3_info.fs3_uids_info.guid_format == MULTI_ASIC_GUIDS)
+    {
+        printFs4OrNewerUids(fwInfo.fs3_info.fs3_uids_info.multi_asic_guids.image_layout_uids.base_guid,
+                            fwInfo.fs3_info.fs3_uids_info.multi_asic_guids.image_layout_uids.base_guid, "GUID", false);
+        printFs4OrNewerUids(fwInfo.fs3_info.fs3_uids_info.multi_asic_guids.image_layout_uids.base_mac,
+                            fwInfo.fs3_info.orig_fs3_uids_info.multi_asic_guids.image_layout_uids.base_mac, "MAC",
+                            false);
+        printPguidGuids(&fwInfo.fs3_info.fs3_uids_info.multi_asic_guids);
     }
     else
     {
@@ -4233,6 +4204,50 @@ FlintStatus QuerySubCommand::printImageInfo(const fw_info_t& fwInfo)
     }
     printf("Default Update Method: %s\n", updateMethod.c_str());
     return FLINT_SUCCESS;
+}
+
+void QuerySubCommand::PrintLifeCycle(const life_cycle_t& lifeCycle)
+{
+    try
+    {
+        string lifeCycleString = "";
+        if (lifeCycle.version_field == 0)
+        {
+            lifeCycleString = life_cycle_fs4_strings.at(static_cast<LifeCycleFS4>(lifeCycle.value));
+        }
+        else
+        {
+            lifeCycleString = life_cycle_fs5_strings.at(static_cast<LifeCycleFS5>(lifeCycle.value));
+        }
+        printf("Life cycle:            %s\n", lifeCycleString.c_str());
+    }
+    catch (const std::out_of_range& e)
+    {
+        reportErr(true, "The life cycle value is out of range: %u\n", lifeCycle.value);
+    }
+}
+
+bool HwSubCommand::PrintWriteProtectedBits(const ext_flash_attr_t& attr)
+{
+    int flash_index = 0;
+    int rc = attr.mf_get_write_protect_rc_array[flash_index];
+    bool ret_val = true;
+    write_protect_info_t protect_info = attr.protect_info_array[flash_index];
+    if (rc == MFE_OK)
+    {
+        std::bitset<BP_SIZE> bp_bits(protect_info.sectors_num);
+        string tbs_bit = (protect_info.is_bottom ? "1" : "0");
+        int msb = BP_SIZE - 1;
+        std::cout << "  TBS, BP[" << msb << ":0]            " << tbs_bit << ", " << bp_bits << endl;
+    }
+    else
+    {
+        if (rc != MFE_NOT_SUPPORTED_OPERATION)
+        {
+            ret_val = false;
+        }
+    }
+    return ret_val;
 }
 
 FlintStatus QuerySubCommand::printInfo(const fw_info_t& fwInfo, bool fullQuery)
@@ -4471,15 +4486,7 @@ FlintStatus QuerySubCommand::printInfo(const fw_info_t& fwInfo, bool fullQuery)
         { // working only on devices with FW control
             if (ops->IsLifeCycleSupported())
             { // from CX6 and above
-                unsigned int index = (unsigned int)fwInfo.fs3_info.life_cycle;
-                if (index >= NUM_OF_LIFE_CYCLES)
-                {
-                    reportErr(true, "The life cycle value is out of range: %u", index);
-                }
-                else
-                {
-                    printf("Life cycle:            %s\n", life_cycle_strings[index]);
-                }
+                PrintLifeCycle(fwInfo.fs3_info.life_cycle);
             }
             if (ops->IsSecureBootSupported())
             { // from CX6DX and above
@@ -4522,20 +4529,15 @@ FlintStatus QuerySubCommand::printInfo(const fw_info_t& fwInfo, bool fullQuery)
                 if (ops->IsLifeCycleAccessible(fwInfo.fw_info.chip_type))
                 {
                     printf("Image Boot Status:     %d\n", fwInfo.fs3_info.global_image_status);
-
-                    unsigned int index = (unsigned int)fwInfo.fs3_info.life_cycle;
-                    if (index >= NUM_OF_LIFE_CYCLES)
+                    PrintLifeCycle(fwInfo.fs3_info.life_cycle);
+                    if (fwInfo.fs3_info.life_cycle.version_field == 0 &&
+                        CRSpaceRegisters::IsLifeCycleSecured(fwInfo.fs3_info.life_cycle))
                     {
-                        reportErr(true, "The life cycle value is out of range: %u", index);
-                    }
-                    else
-                    {
-                        printf("Life cycle:            %s\n", life_cycle_strings[index]);
-                    }
-                    if (fwInfo.fs3_info.life_cycle == GA_SECURED &&
-                        fwInfo.fs3_info.device_security_version_access_method == DIRECT_ACCESS)
-                    {
-                        printf("EFUSE Security Ver:    %d\n", fwInfo.fs3_info.device_security_version_gw);
+                        if (fwInfo.fs3_info.device_security_version_access_method == DIRECT_ACCESS)
+                        {
+                            printf("EFUSE Security Ver:    %d\n", fwInfo.fs3_info.device_security_version_gw);
+                        }
+                        printf("Image Security Ver:    %d\n", fwInfo.fs3_info.image_security_version);
                     }
                 }
             }
@@ -4547,6 +4549,33 @@ FlintStatus QuerySubCommand::printInfo(const fw_info_t& fwInfo, bool fullQuery)
         // blankGuids only exsists in FS2 image type in mlxfwops why?
         printf(FLINT_BLANK_GUIDS_WARNING);
     }
+
+    if (fwInfo.fs3_info.ini_file_version)
+    {
+        printf("INI revision:          0x%x\n", fwInfo.fs3_info.ini_file_version);
+    }
+
+    if (fwInfo.fs3_info.geo_address_valid)
+    {
+        printf("Geographical Address:  ASIC %x\n", fwInfo.fs3_info.geo_address);
+    }
+
+    if (fwInfo.fs3_info.socket_direct)
+    {
+        printf("Socket Direct:         Yes\n");
+        if (fwInfo.fs3_info.is_aux_card_connected_valid)
+        {
+            if (fwInfo.fs3_info.aux_card_connected)
+            {
+                printf("Aux Card is Connected: Yes\n");
+            }
+            else
+            {
+                printf("Aux Card is Connected: No\n");
+            }
+        }
+    }
+
     return FLINT_SUCCESS;
 }
 
@@ -4728,9 +4757,11 @@ QueryComponentSubCommand::QueryComponentSubCommand()
     _flagShort = "qc";
     _param = "";
     _paramExp = "None";
-    _example = FLINT_NAME " -d /dev/mst/mt53100_pciconf0 --component_type sync_clock query_components";
+    _example =  FLINT_NAME " -d /dev/mst/mt53100_pciconf0 --component_type sync_clock query_components\n" FLINT_NAME
+                 " -d /dev/mst/mt4129_pciconf1 --component_type digital_cacert query_components /tmp/outfile\n";
     _v = Wtv_Dev;
-    _maxCmdParamNum = 0;
+    _maxCmdParamNum = 1;
+    _minCmdParamNum = 0;
     _cmdType = SC_Query_Components;
     _mccSupported = true;
 }
@@ -4745,21 +4776,23 @@ FlintStatus QueryComponentSubCommand::executeCommand()
     }
     if (_fwOps->IsFsCtrlOperations())
     {
-        bool rc = true;
-        FwComponent::comps_ids_t comp = FwComponent::getCompId(_flintParams.component_type);
-        switch (comp)
+        FlintStatus rc = FLINT_SUCCESS;
+        switch (_comp)
         {
             case FwComponent::COMPID_CLOCK_SYNC_EEPROM:
                 rc = querySyncE();
+                break;
+            case FwComponent::DIGITAL_CACERT:
+                rc = QueryCertStatus();
                 break;
             case FwComponent::COMPID_UNKNOWN:
             default:
                 reportErr(true, "Unknown component type given.\n");
                 return FLINT_FAILED;
         }
-        if (!rc)
+        if (rc != FLINT_SUCCESS)
         {
-            return FLINT_FAILED;
+            return rc;
         }
     }
     else
@@ -4773,9 +4806,15 @@ FlintStatus QueryComponentSubCommand::executeCommand()
 
 bool QueryComponentSubCommand::verifyParams()
 {
+    _comp = FwComponent::getCompId(_flintParams.component_type);
     if (_flintParams.component_type.empty())
     {
         reportErr(true, FLINT_COMMAND_FLAGS_ERROR, _name.c_str(), "\"--component_type\"");
+        return false;
+    }
+    if (_comp == FwComponent::DIGITAL_CACERT && _flintParams.cmd_params.size() == 1 && _flintParams.cert_uuid.empty())
+    {
+        reportErr(true, "For query_components with specific output file, Please specify cert_uuid.\n");
         return false;
     }
     return true;
@@ -4807,6 +4846,33 @@ FlintStatus QueryComponentSubCommand::querySyncE()
 
     return FLINT_SUCCESS;
 }
+
+FlintStatus QueryComponentSubCommand::QueryCertStatus()
+{
+#if ENABLE_DPA
+    vector<u_int8_t> cacertRawData;
+    if (!_fwOps->ReadMccComponent(cacertRawData, FwComponent::DIGITAL_CACERT))
+    {
+        reportErr(true, "Failed to read cacert.\n");
+        return FLINT_FAILED;
+    }
+
+    unique_ptr<FsCertOperations> FsCertOps(new FsCertOperations(cacertRawData));
+
+    string outputFile = _flintParams.cmd_params.size() ? _flintParams.cmd_params[0] : "";
+    if (!FsCertOps->GetCert(_flintParams.cert_uuid, outputFile))
+    {
+        reportErr(true, "%s\n", FsCertOps->err());
+        return FLINT_FAILED;
+    }
+
+    return FLINT_SUCCESS;
+#else
+    reportErr(true, "QueryCertStatus for DPA is not supported.\n");
+    return FLINT_FAILED;
+#endif
+}
+
 
 /***********************
  * Class: ImageReactivationSubCommand
@@ -5352,7 +5418,7 @@ SgSubCommand::SgSubCommand()
                     "Use -guid(s), -mac(s) and -uid(s) flags to set the desired values.\n"
                     "- On pre-ConnectX devices, the sg command  is used in production to apply GUIDs/MACs values to"
                     " cards that were pre-burnt with blank GUIDs. It is not meant for use in field.\n"
-                    "- On 4th generation devices, this command can operate on both image file and image on flash.\n"
+                    "- On 4th and 5th  generation devices, this command can operate on both image file and image on flash.\n"
                     "If the GUIDs/MACs/UIDs in the image on flash are non-blank, flint will re-burn the current"
                     " image using the given GUIDs/MACs/UIDs.";
     _flagLong = "sg";
@@ -5386,7 +5452,7 @@ void SubCommand::ClearGuidStruct(FwOperations::sg_params_t& sgParams)
     sgParams.numOfGUIDs = 0;    // number of GUIDs to allocate for each port. keep zero for default. (FS3 image Only)
     sgParams.stepSize = 0;      // step size between GUIDs. keep zero for default. (FS3 Image Only)
     sgParams.usePPAttr = false; // if set, use the per port attributes below (FS3 Image Only)
-    memset(&(sgParams.numOfGUIDsPP), 0xffff, sizeof(sgParams.numOfGUIDsPP));
+    memset(&(sgParams.numOfGUIDsPP), 0xff, sizeof(sgParams.numOfGUIDsPP));
     memset(&(sgParams.stepSizePP), 0xff, sizeof(sgParams.stepSizePP));
 }
 
@@ -5548,7 +5614,11 @@ FlintStatus SgSubCommand::sgFs2()
     return FLINT_SUCCESS;
 }
 
+#ifndef MST_UL
 #define FW_RESET_MSG "To load new configuration run mlxfwreset or reboot machine"
+#else
+#define FW_RESET_MSG "To load new configuration run mstfwreset or reboot machine"
+#endif
 
 FlintStatus SgSubCommand::sgFs3()
 {
@@ -5560,6 +5630,13 @@ FlintStatus SgSubCommand::sgFs3()
     {
         string flag = _flintParams.guids_specified ? "-guids" : "-macs";
         reportErr(true, FLINT_NOT_SUPP_UID_FLAG_ERROR, flag.c_str());
+        return FLINT_FAILED;
+    }
+
+    // ArcusE doesn't have DEV_INFO section
+    if (_info.fw_info.chip_type == CT_ARCUSE)
+    {
+        reportErr(true, FLINT_INVALID_COMMAD_ERROR, "ArcusE device/image is not supported.");
         return FLINT_FAILED;
     }
 
@@ -5641,7 +5718,7 @@ SmgSubCommand::SmgSubCommand()
 {
     _name = "smg";
     _desc = "Set manufacture GUIDs (For FS3/FS4 image only).";
-    _extendedDesc = "Set manufacture GUID, Set manufacture GUIDs in the given FS3/FS4 image.\n"
+    _extendedDesc = "Set manufacture GUID, Set manufacture GUIDs in the given FS3/FS4/FS5 image.\n"
                     "Use -uid flag to set the desired GUIDs, intended for production use only.";
     _flagLong = "smg";
     _flagShort = "";
@@ -5662,7 +5739,7 @@ SmgSubCommand::SmgSubCommand()
     _ops = NULL;
     memset(&_baseGuid, 0, sizeof(_baseGuid));
     memset(&_info, 0, sizeof(_info));
-    memset(&(_baseGuid.num_of_guids_pp), 0xffff, sizeof(_baseGuid.num_of_guids_pp));
+    memset(&(_baseGuid.num_of_guids_pp), 0xff, sizeof(_baseGuid.num_of_guids_pp));
     memset(&(_baseGuid.step_size_pp), 0xff, sizeof(_baseGuid.step_size_pp));
     _baseGuid.use_pp_attr = 1;
 }
@@ -6430,8 +6507,12 @@ HwSubCommand::HwSubCommand()
                 "    QuadEn: can be 0 or 1\n"
                 "    DummyCycles: can be [1..15]\n"
                 "    Flash[0|1|2|3].WriteProtected can be:\n"
-                "        <Top|Bottom>,<1|2|4|8|16|32|64>-<Sectors|SubSectors>"
-                "    DriverStrength: can be [25,50,75,100]\n";
+                "        <Top|Bottom>,<1|2|4|8|16|32|64>-<Sectors|SubSectors>\n"
+                "    DriverStrength: can be:\n"
+                "        For Winbond flashes: [25,50,75,100](%)\n"
+                "        For Micron flashes:  [22,44,66,100](%)\n"
+                "        For Micron MX25K16XXX flashes:  [41,70,83,100](%)\n"
+                "        For Issi flashes:  [16,25,33,50,75,100](%)\n";
     _example = "flint -d " MST_DEV_EXAMPLE1 " hw query\n" FLINT_NAME " -d " MST_DEV_EXAMPLE1
                " hw set QuadEn=1\n" FLINT_NAME " -d " MST_DEV_EXAMPLE1 " hw set Flash1.WriteProtected=Top,1-SubSectors";
 #else
@@ -6594,7 +6675,7 @@ FlintStatus HwSubCommand::printAttr(const ext_flash_attr_t& attr)
         switch (attr.mf_get_driver_strength_rc)
         {
             case MFE_OK:
-                printf("  " DRIVER_STRENGTH_PARAM "          %d\n", attr.driver_strength);
+                printf("  " DRIVER_STRENGTH_PARAM "          %d%%\n", attr.driver_strength);
                 break;
 
             case MFE_MISMATCH_PARAM:
@@ -6619,6 +6700,15 @@ FlintStatus HwSubCommand::printAttr(const ext_flash_attr_t& attr)
     }
     printf("  JEDEC_ID                0x%06x\n",
            attr.jedec_id & 0xffffff); // JEDEC_ID is built from 3B, so we mask last byte
+    
+    if (attr.write_protect_support)
+    {
+        if (!PrintWriteProtectedBits(attr))
+        {
+            return FLINT_FAILED;
+        }
+    }
+
     return FLINT_SUCCESS;
 }
 
@@ -8057,25 +8147,12 @@ FlintStatus ExportPublicSubCommand::executeCommand()
             reportErr(true, "Extracting public key is applicable only for FS4 FW.\n");
             return FLINT_FAILED;
         }
-        if (!_imgOps->getExtendedHWAravaPtrs(NULL, _imgOps->GetIoAccess(), false, false))
+        if (!_imgOps->GetRSAPublicKey(resultBuffer))
         {
-            reportErr(true, "Extracting secure boot HW pointers failed: %s.\n", _imgOps->err());
-            return FLINT_FAILED;
-        }
-        u_int32_t addr = _imgOps->GetPublicKeySecureBootPtr();
-        if (addr == 0)
-        {
-            reportErr(true,
-                      "Extracting public key failed: please check that the image type supports the secure boot.\n",
-                      _imgOps->err());
+            reportErr(true, "Extracting public key failed - %s.\n", _imgOps->err());
             return FLINT_FAILED;
         }
         resultBuffer.resize(TOTAL_PUBLIC_KEY_SIZE);
-        if (!_imgOps->FwReadBlock(addr, TOTAL_PUBLIC_KEY_SIZE, resultBuffer))
-        {
-            reportErr(true, FLINT_IMAGE_READ_ERROR, _imgOps->err());
-            return FLINT_FAILED;
-        }
     }
     writeToFile(_flintParams.output_file, resultBuffer);
     return FLINT_SUCCESS;

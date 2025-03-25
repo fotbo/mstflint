@@ -67,6 +67,7 @@
 #define SPECTRUM3_HW_ID 592
 #define QUANTUM2_HW_ID 599
 #define QUANTUM3_HW_ID 603
+#define ARCUSE_HW_ID 45568
 #define SPECTRUM4_HW_ID 596
 #define GEARBOX_HW_ID 594
 #define GB_MANAGER_HW_ID 595
@@ -79,6 +80,7 @@
 #define CX6LX_HW_ID 534
 #define CX7_HW_ID 536
 #define CX8_HW_ID 542
+#define CX9_HW_ID 549
 #define BF_HW_ID 529
 #define BF2_HW_ID 532
 #define BF3_HW_ID 540
@@ -100,14 +102,22 @@ typedef enum
 
 typedef enum
 {
-    PRODUCTION = 0,
-    GA_SECURED = 1,
-    GA_NON_SECURED = 2,
-    RMA = 3,
-    NUM_OF_LIFE_CYCLES = 4
-} life_cycle_t;
+    FS4_LC_PRODUCTION = 0,
+    FS4_LC_GA_SECURED = 1,
+    FS4_LC_GA_NON_SECURED = 2,
+    FS4_LC_RMA = 3
+} LifeCycleFS4;
+
+typedef enum
+{
+    FS5_LC_BLANK_CHIP = 0,
+    FS5_LC_PRE_PRODUCTION = 4,
+    FS5_LC_PRODUCTION = 6,
+    FS5_LC_FAILURE_ANALYSIS = 7
+} LifeCycleFS5;
 
 #define MAX_HTOC_ENTRIES_NUM 28
+#define MAX_HTOC_ENTRIES_NUM_VERSION_1 64
 #define HASHES_TABLE_TAIL_SIZE 8
 #define HTOC_HASH_SIZE 64
 
@@ -304,6 +314,7 @@ typedef enum chip_type
     CT_CONNECTX6LX,
     CT_CONNECTX7,
     CT_CONNECTX8,
+    CT_CONNECTX9,
     CT_SPECTRUM3,
     CT_BLUEFIELD2,
     CT_BLUEFIELD3,
@@ -314,7 +325,8 @@ typedef enum chip_type
     CT_SPECTRUM4,
     CT_GEARBOX,
     CT_GEARBOX_MGR,
-    CT_ABIR_GEARBOX
+    CT_ABIR_GEARBOX,
+    CT_ARCUSE
 } chip_type_t;
 
 #define IS_HCA(chipType)                                                                                 \
@@ -412,16 +424,39 @@ typedef struct
     struct fs4_uid_entry base_mac;
 } image_layout_uids_t;
 
+typedef struct multi_asicfw_guids
+{
+    image_layout_uids_t image_layout_uids;
+    u_int64_t sys_guid;
+    u_int64_t node_guid;
+    u_int64_t port_guid;
+    u_int64_t allocated_guid;
+} multi_asic_guids_t;
+
+typedef enum guid_format
+{
+    CIB_UIDS,
+    IMAGE_LAYOUT_UIDS,
+    MULTI_ASIC_GUIDS
+} guid_format_t;
+
 typedef struct uids
 {
-    int valid_field; // 0: cib_uids , 1: image_layout_uids
+    guid_format_t guid_format;
     union
     {
         cib_uids_t cib_uids;
         cx4_uids_t cx4_uids; // keeping this member for neohost
         image_layout_uids_t image_layout_uids;
+        multi_asic_guids_t multi_asic_guids;
     };
 } uids_t;
+
+typedef struct life_cycle
+{
+    int version_field; // 0: fs4 , 1: fs5
+    u_int8_t value;
+} life_cycle_t;
 
 typedef enum
 {
@@ -456,6 +491,12 @@ typedef struct fs3_info_ext
     struct reg_access_hca_mfsv_reg_ext device_security_version_mfsv;
 
     int global_image_status;
+    u_int32_t ini_file_version;
+    u_int8_t geo_address;
+    bool geo_address_valid;
+    bool socket_direct;
+    bool aux_card_connected;
+    bool is_aux_card_connected_valid;
 
 } fs3_info_t;
 
@@ -496,6 +537,15 @@ typedef struct roms_info
     rom_info_t rom_info[MAX_ROMS_NUM];
 } roms_info_t;
 
+typedef enum
+{
+    BLANK = 0,
+    PRE_PROD_IPN = 1,
+    SECURE_IPN = 2,
+    PRE_PROD_OPN = 3,
+    SECURE_OPN = 4
+} device_sku;
+
 typedef struct fw_info_com
 {
     char psid[PSID_LEN + 1];
@@ -524,6 +574,8 @@ typedef struct fw_info_com
     u_int8_t encrypted_fw;
     u_int32_t burn_image_size; //! Be aware! This field is backward compatible starting from BB/CX-7
                                //! Use this field only for encrypted images
+    u_int8_t dtoc_offset;
+    device_sku sku;
 } fw_info_com_t;
 
 typedef struct fw_info_ext

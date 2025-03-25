@@ -597,6 +597,8 @@ void tools_open_nv_hdr_fifth_gen_pack(const struct tools_open_nv_hdr_fifth_gen *
 	adb2c_push_bits_to_buff(ptr_buff, offset, 1, (u_int32_t)ptr_struct->rd_en);
 	offset = 6;
 	adb2c_push_bits_to_buff(ptr_buff, offset, 1, (u_int32_t)ptr_struct->over_en);
+	offset = 2;
+	adb2c_push_bits_to_buff(ptr_buff, offset, 2, (u_int32_t)ptr_struct->priority);
 	offset = 32;
 	tools_open_tlv_type_pack(&(ptr_struct->type), ptr_buff + offset / 8);
 }
@@ -621,6 +623,8 @@ void tools_open_nv_hdr_fifth_gen_unpack(struct tools_open_nv_hdr_fifth_gen *ptr_
 	ptr_struct->rd_en = (u_int8_t)adb2c_pop_bits_from_buff(ptr_buff, offset, 1);
 	offset = 6;
 	ptr_struct->over_en = (u_int8_t)adb2c_pop_bits_from_buff(ptr_buff, offset, 1);
+	offset = 2;
+	ptr_struct->priority = (u_int8_t)adb2c_pop_bits_from_buff(ptr_buff, offset, 2);
 	offset = 32;
 	tools_open_tlv_type_unpack(&(ptr_struct->type), ptr_buff + offset / 8);
 }
@@ -646,6 +650,8 @@ void tools_open_nv_hdr_fifth_gen_print(const struct tools_open_nv_hdr_fifth_gen 
 	fprintf(fd, "rd_en                : " UH_FMT "\n", ptr_struct->rd_en);
 	adb2c_add_indentation(fd, indent_level);
 	fprintf(fd, "over_en              : " UH_FMT "\n", ptr_struct->over_en);
+	adb2c_add_indentation(fd, indent_level);
+	fprintf(fd, "priority             : " UH_FMT "\n", ptr_struct->priority);
 	adb2c_add_indentation(fd, indent_level);
 	fprintf(fd, "type:\n");
 	tools_open_tlv_type_print(&(ptr_struct->type), fd, indent_level + 1);
@@ -991,6 +997,30 @@ void tools_open_mnvda_dump(const struct tools_open_mnvda *ptr_struct, FILE *fd)
 	tools_open_mnvda_print(ptr_struct, fd, 0);
 }
 
+void tools_open_mnvdi_pack(const struct tools_open_mnvdi *ptr_struct, u_int8_t *ptr_buff)
+{
+	u_int32_t offset;
+	offset = 0;
+	tools_open_nv_hdr_fifth_gen_pack(&(ptr_struct->nv_hdr), ptr_buff + offset / 8);	
+}
+void tools_open_mnvdi_unpack(struct tools_open_mnvdi *ptr_struct, const u_int8_t *ptr_buff)
+{
+	u_int32_t offset;
+	offset = 0;
+	tools_open_nv_hdr_fifth_gen_unpack(&(ptr_struct->nv_hdr), ptr_buff + offset / 8);
+}
+void tools_open_mnvdi_print(const struct tools_open_mnvdi *ptr_struct, FILE *fd, int indent_level)
+{
+	adb2c_add_indentation(fd, indent_level);
+	fprintf(fd, "======== tools_open_mnvdi ========\n");
+	adb2c_add_indentation(fd, indent_level);
+	fprintf(fd, "nv_hdr:\n");
+	tools_open_nv_hdr_fifth_gen_print(&(ptr_struct->nv_hdr), fd, indent_level + 1);
+}
+unsigned int tools_open_mnvdi_size(void)
+{
+	return TOOLS_OPEN_MNVDI_SIZE;
+}
 void tools_open_mnvgn_pack(const struct tools_open_mnvgn *ptr_struct, u_int8_t *ptr_buff)
 {
 	u_int32_t offset;

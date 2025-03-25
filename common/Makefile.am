@@ -1,5 +1,4 @@
-#--
-# Copyright (c) 2004-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2023-2024 NVIDIA CORPORATION & AFFILIATES. ALL RIGHTS RESERVED.
 #
 # This software is available to you under a choice of one of two
 # licenses.  You may choose to be licensed under the terms of the GNU
@@ -28,30 +27,48 @@
 # ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-#--
 
 # Makefile.am -- Process this file with automake to produce Makefile.in
 
-noinst_HEADERS=compatibility.h bit_slice.h tools_utils.h tools_utils.h tools_version.h
+noinst_LTLIBRARIES = libcommon.la
+
+AM_CPPFLAGS = $(JSON_CFLAGS)
+
+libcommon_la_SOURCES = \
+    bit_slice.h \
+    compatibility.h \
+    tools_algorithm.h \
+    tools_filesystem.cpp \
+    tools_filesystem.h \
+    tools_regex.cpp \
+    tools_regex.h \
+    tools_time.h \
+    tools_utils.h \
+    tools_utils.h \
+    tools_version.h \
+    tools_json.cpp \
+    tools_json.h 
 
 commonincludedir = $(includedir)/mstflint/common/
-
 commoninclude_HEADERS = compatibility.h
 
 update_prefix = sed -e 's,[@]MST_LIB_DIR[@]${CONF_DISABLE_PATH_UPDATE},$(libdir),g'\
                     -e 's,[@]MST_BIN_DIR[@]${CONF_DISABLE_PATH_UPDATE},$(bindir),g'\
                     -e 's,[@]MFTCONF_PREFIX[@],$(prefix),g'
-                    
+
 update_tools_version = sed -e 's,[@]MSTFLINT_VERSION_STR[@],${MSTFLINT_VERSION_STR},g' \
      	          	-e 's,[@]TOOLS_BUILD_TIME[@],${TOOLS_BUILD_TIME},g' \
                     -e 's,[@]TOOLS_GIT_SHA[@],${TOOLS_GIT_SHA},g'
 
-all: python_wrapper.sh tools_version.py  mft_logger.py
+all: python_wrapper.sh tools_version.py tools_version.h mft_logger.py
 	$(update_prefix) < $(srcdir)/python_wrapper.sh > python_wrapper
 	chmod +x python_wrapper
-	
+
 tools_version.py:
 	$(update_tools_version) < $(srcdir)/tools_version.py.in > tools_version.py
+
+tools_version.h:
+	$(update_tools_version) < $(srcdir)/tools_version.h.in > tools_version.h
 
 tools_version_pylibdir=$(libdir)/mstflint/python_tools/
 tools_version_pylib_DATA = tools_version.py

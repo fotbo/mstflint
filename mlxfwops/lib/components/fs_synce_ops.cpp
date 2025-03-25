@@ -1,14 +1,34 @@
 /*
- * Copyright (c) 2013-2021 NVIDIA CORPORATION & AFFILIATES. ALL RIGHTS RESERVED.
- *
- * This software product is a proprietary product of Nvidia Corporation and its affiliates
- * (the "Company") and all right, title, and interest in and to the software
- * product, including all associated intellectual property rights, are and
- * shall remain exclusively with the Company.
- *
- * This software product is governed by the End User License Agreement
- * provided with the software product.
- */
+* Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. ALL RIGHTS RESERVED.
+*
+* This software is available to you under a choice of one of two
+* licenses.  You may choose to be licensed under the terms of the GNU
+* General Public License (GPL) Version 2, available from the file
+* COPYING in the main directory of this source tree, or the
+* OpenIB.org BSD license below:
+*
+*     Redistribution and use in source and binary forms, with or
+*     without modification, are permitted provided that the following
+*     conditions are met:
+*
+*      - Redistributions of source code must retain the above
+*        copyright notice, this list of conditions and the following
+*        disclaimer.
+*
+*      - Redistributions in binary form must reproduce the above
+*        copyright notice, this list of conditions and the following
+*        disclaimer in the documentation and/or other materials
+*        provided with the distribution.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+* NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+* BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+* ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+* CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+* SOFTWARE.
+*/
 
 #include "fs_synce_ops.h"
 #include <sstream>
@@ -119,6 +139,11 @@ u_int32_t FsSyncEOperations::GetDeviceIndex()
     return _header.clockSyncIndex;
 }
 
+const char* FsSyncEOperations::FwGetResetRecommandationStr()
+{
+    return REBOOT_REQUIRED_STR;
+}
+
 string FsSyncEOperations::ToString(SystemID systemID)
 {
     switch (systemID)
@@ -137,6 +162,14 @@ string FsSyncEOperations::ToString(SystemID systemID)
             return "Komodo";
         case (SystemID::Kong):
             return "Kong";
+        case (SystemID::Hippo):
+            return "Hippo";
+        case (SystemID::Crocodile):
+            return "Crocodile";
+        case (SystemID::BlackMamba):
+            return "BlackMamba";
+        case (SystemID::Bobcat):
+            return "Bobcat";
         default:
             return "Unknown";
     }

@@ -39,12 +39,19 @@
 
 #include <compatibility.h>
 #include <mtcr.h>
+#include <json/reader.h>
+#include <json/writer.h>
+#include "common/tools_json.h"
 
+#ifdef CABLES_SUPP
+#include <cable_access/cdb_cable_commander.h>
+#endif
 
-#include "mlxcfg_4th_gen_commander.h"
-//#include "mlxcfg_lib.h"
+// #include "mlxcfg_lib.h"
 #include "mlxcfg_commander.h"
 #include "mlxcfg_view.h"
+#include "mlxcfg_utils.h"
+
 
 #define MAX_ERR_STR_LEN 1024
 #define MAX_BUF_SIZE 1024
@@ -79,16 +86,10 @@ typedef enum
     Mc_UnknownCmd
 } mlxCfgCmd;
 
-typedef enum
-{
-    UNSUPPORTED_DEVICE = -1,
-    HCA = 0,
-    Switch = 1,
-} Device_Type;
-
 typedef struct QueryOutputItem
 {
     string mlxconfigName;
+    bool isReadOnly;
     u_int32_t nextVal;
     string strNextVal;
     u_int32_t currVal;
@@ -113,10 +114,9 @@ public:
         dbName(DB_NAME),
         privPemFile(),
         keyPairUUID(),
-        opensslEngine(),
-        opensslKeyId(),
         allAttrs(false),
         cmd(Mc_UnknownCmd),
+        isJsonOutputRequested(false),
         yes(false),
         force(false),
         enableVerbosity(false)
@@ -133,10 +133,9 @@ public:
     std::string dbName;
     std::string privPemFile;
     std::string keyPairUUID;
-    std::string opensslEngine;
-    std::string opensslKeyId;
     bool allAttrs;
     mlxCfgCmd cmd;
+    bool isJsonOutputRequested;
     bool yes;
     std::vector<ParamView> setParams;
     bool force; // ignore parameter checks
@@ -146,7 +145,7 @@ public:
 class MlxCfg
 {
 public:
-    MlxCfg() : _mlxParams(), _errStr(), _allInfo(), _devType(DeviceUnknown) {}
+    MlxCfg() : _mlxParams(), _errStr(), _devType(DeviceUnknown) {}
     ~MlxCfg(){};
     mlxCfgStatus execute(int argc, char* argv[]);
 
@@ -154,11 +153,11 @@ private:
     // User interface and parsing methods
     void printHelp();
     mlxCfgStatus showDevConfs();
+    const char* getDeviceName(mfile* mf);
     void printVersion();
     void printUsage();
-    void printOpening(mfile* mf, const char* dev, int devIndex);
+    void printOpening(mfile* mf, const char* dev, string deviceIndex, Json::Value& oJsonValue);
     void printConfHeader(bool showDefualt, bool showNew, bool showCurrent);
-    Device_Type getDeviceTypeFromString(string inStr);
     mlxCfgStatus getNumberFromString(const char* str, u_int32_t& num);
     mlxCfgStatus parseArgs(int argc, char* argv[]);
     // Helper functions for parse args
@@ -175,7 +174,6 @@ private:
     const char* getConfigWarning(const string& mlx_config_name, const string& set_val);
 
     bool tagExsists(string tag);
-    const char* getDeviceName(mfile* mf);
 
     // Query cmd
     mlxCfgStatus queryDevsCfg();
@@ -183,6 +181,7 @@ private:
       queryDevCfg(const char* dev, const char* pci = (const char*)NULL, int devIndex = 1, bool printNewCfg = false);
     mlxCfgStatus queryDevCfg(Commander* commander,
                              const char* dev,
+                             bool isWriteOperation,
                              const char* pci = (const char*)NULL,
                              int devIndex = 1,
                              bool printNewCfg = false);
@@ -208,6 +207,11 @@ private:
     mlxCfgStatus writeNVOutputFile(string content);
     mlxCfgStatus writeNVOutputFile(vector<string> lines);
 
+    // write query output to json funtions
+    mlxCfgStatus
+      WriteSingleParam(QueryOutputItem& queryOutItem, string deviceIndex, u_int8_t verbose, Json::Value& oJsonValue);
+    void writeParamToJson(Json::Value& oJsonValue, string field, string param, u_int32_t val);
+
     mlxCfgStatus genTLVsFile();
     mlxCfgStatus genXMLTemplate();
     mlxCfgStatus raw2XMLAux(bool isBin);
@@ -230,7 +234,6 @@ private:
 
     MlxCfgParams _mlxParams;
     std::string _errStr;
-    MlxCfgAllInfo _allInfo;
     dm_dev_id_t _devType;
 };
 

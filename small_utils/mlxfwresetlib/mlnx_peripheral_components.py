@@ -41,21 +41,23 @@ import platform
 import re
 from .pci_device import PciDevice
 from .mlxfwreset_utils import cmdExec
+import mtcr
 
 
 class MlnxPeripheralComponents(object):
 
-    SD_SUPPORTED_DID = [0x21e, 0x218, 0x216, 0x212, 0x20f, 0x20d, 0x209, 0x20b]  # Connectx8,Connectx7,Connectx6LX,Connectx6DX,Connectx6,Connectx5 (SD device) ,Connectx4/Connectx4Lx (MH device connected as SD)
+    SD_SUPPORTED_DID = [0x225, 0x21e, 0x218, 0x216, 0x212, 0x20f, 0x20d, 0x209, 0x20b, 0x21c]  # Connectx9,Connectx8,Connectx7,Connectx6LX,Connectx6DX,Connectx6,Connectx5 (SD device) ,Connectx4/Connectx4Lx (MH device connected as SD), BF-3
 
-    def __init__(self):
+    def __init__(self, logger):
         self.pci_devices = []
         self.os = platform.system()
         self.discover_pci_devices()
+        self.logger = logger
 
     def discover_pci_devices(self):
 
         if self.os == 'Linux':
-            cmd = 'mdevices_info -vv'
+            cmd = 'mstdevices_info -vv'
             pattern = r'.*\s+(\S+)\s+(([0-9A-Fa-f]{4})*:*([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2})\.([0-9A-Fa-f]{1,2})).*'
         elif self.os == 'FreeBSD':
             cmd = 'mst status -v'
@@ -109,7 +111,10 @@ class MlnxPeripheralComponents(object):
                         RuntimeError("Unsupported OS")
 
                     pci_device = PciDevice(aliases, domain, bus, dev, fn)
-                    self.pci_devices.append(pci_device)
+                    MstDev = mtcr.MstDevice(pci_device.get_alias())
+                    if not MstDev.isGPUDevice():
+                        self.pci_devices.append(pci_device)
+                    MstDev.close()
             except BaseException:
                 raise RuntimeError("Failed to get device PCI Address")  # Why it's required??? You don't do anything in the excpetion
 
@@ -138,22 +143,21 @@ class MlnxPeripheralComponents(object):
                             and pci_device.bus == usr_pci_device.bus \
                             and pci_device.device == usr_pci_device.device:
                         continue
-
-                    # Skip if the current pci-device is not supported for Socket-Direct
-                    if pci_device.get_cfg_did() not in MlnxPeripheralComponents.SD_SUPPORTED_DID:
+                    try:
+                        # Skip if the current pci-device is not supported for Socket-Direct
+                        if pci_device.get_cfg_did() not in MlnxPeripheralComponents.SD_SUPPORTED_DID:
+                            continue
+                         # Check only function 0 (skip otherwise)
+                        if pci_device.fn != 0:
+                            continue
+                        # Skip if device in livefish mode
+                        if pci_device.is_livefish_mode():
+                            continue
+                        if usr_manufacturing_base_mac == pci_device.get_manufacturing_base_mac():
+                            sd_pci_devices.append(pci_device)
+                    except Exception as e:
+                        self.logger.warning("Failed to get info for device [%s], error [%s]" % (pci_device, e))
                         continue
-
-                    # Check only function 0 (skip otherwise)
-                    if pci_device.fn != 0:
-                        continue
-
-                    # Skip if device in livefish mode
-                    if pci_device.is_livefish_mode():
-                        continue
-
-                    if usr_manufacturing_base_mac == pci_device.get_manufacturing_base_mac():
-                        sd_pci_devices.append(pci_device)
-
         return sd_pci_devices
 
 
@@ -163,7 +167,7 @@ if __name__ == '__main__':
 
     device = sys.argv[1]
 
-    peripherals = MlnxPeripheralComponents()
+    peripherals = MlnxPeripheralComponents(None)
     for pci_device in peripherals.pci_devices:
         print(pci_device)
 

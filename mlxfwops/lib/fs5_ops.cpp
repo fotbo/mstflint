@@ -1,18 +1,40 @@
 /*
- * Copyright (c) 2013-2021 NVIDIA CORPORATION & AFFILIATES. ALL RIGHTS RESERVED.
+ * Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. ALL RIGHTS RESERVED.
  *
- * This software product is a proprietary product of Nvidia Corporation and its affiliates
- * (the "Company") and all right, title, and interest in and to the software
- * product, including all associated intellectual property rights, are and
- * shall remain exclusively with the Company.
+ * This software is available to you under a choice of one of two
+ * licenses.  You may choose to be licensed under the terms of the GNU
+ * General Public License (GPL) Version 2, available from the file
+ * COPYING in the main directory of this source tree, or the
+ * OpenIB.org BSD license below:
  *
- * This software product is governed by the End User License Agreement
- * provided with the software product.
+ *     Redistribution and use in source and binary forms, with or
+ *     without modification, are permitted provided that the following
+ *     conditions are met:
+ *
+ *      - Redistributions of source code must retain the above
+ *        copyright notice, this list of conditions and the following
+ *        disclaimer.
+ *
+ *      - Redistributions in binary form must reproduce the above
+ *        copyright notice, this list of conditions and the following
+ *        disclaimer in the documentation and/or other materials
+ *        provided with the distribution.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
-
 #include "fs5_ops.h"
 #include "calc_hw_crc.h"
 #include "fs5_image_layout_layouts.h"
+#include <algorithm>
+
+const u_int32_t Fs5Operations::BCH_SIZE_IN_BYTES = 0x2000;
 
 u_int8_t Fs5Operations::FwType()
 {
@@ -72,9 +94,10 @@ bool Fs5Operations::ParseHwPointers(VerifyCallBack verifyCallBackFunc)
     fs5_image_layout_hw_pointers_gilboa_unpack(&hwPointers, (u_int8_t*)buff);
     _boot2_ptr = hwPointers.boot2_ptr.ptr;
     _itoc_ptr = hwPointers.toc_ptr.ptr;
-    _tools_ptr = hwPointers.tool2_ptr.ptr; // TODO - fix typo tool2 --> tools in gilboa adb
-    _image_info_section_ptr = hwPointers.image_info_ptr.ptr;
-    _hashes_table_ptr = hwPointers.ncore_hashes_ptr.ptr;
+    _tools_ptr = hwPointers.tools_ptr.ptr;
+    _image_info_section_ptr = hwPointers.image_info_section_pointer.ptr;
+    _hashes_table_ptr = hwPointers.ncore_hashes_pointer.ptr;
+    _ncore_bch_ptr = hwPointers.ncore_bch_pointer.ptr;
     _is_hw_ptrs_initialized = true;
     return true;
 }
@@ -103,52 +126,90 @@ bool Fs5Operations::Init()
     {
         return false;
     }
-    // Below commented out at the moment, if needed just remove and inherit it from fs4_ops
-    // fw_info_t fwInfo;
-    // if (!FwQuery(&fwInfo, false, false, false))
-    // {
-    //     return false;
-    // }
-    return true;
-}
 
-bool Fs5Operations::GetImageSize(u_int32_t* image_size)
-{
-    if (!GetImageSizeFromImageInfo(image_size))
+    fw_info_t fwInfo;
+    if (!FwQuery(&fwInfo, false, false, false))
     {
         return false;
     }
     return true;
 }
 
-bool Fs5Operations::CheckBoot2(u_int32_t offs, bool fullRead, const char* pref, VerifyCallBack verifyCallBackFunc)
+bool Fs5Operations::GetImageInfo(u_int8_t* buff)
+{
+    DPRINTF(("Fs5Operations::GetImageInfo call Fs3Operations::GetImageInfo\n"));
+    return Fs3Operations::GetImageInfo(buff);
+}
+
+bool Fs5Operations::GetImageSize(u_int32_t* image_size)
+{
+    if (!GetEncryptedImageSizeFromImageInfo(image_size))
+    {
+        return false;
+    }
+    return true;
+}
+
+bool Fs5Operations::GetHashesTableSize(u_int32_t& size)
+{
+    bool image_encrypted = false;
+    if (!isEncrypted(image_encrypted))
+    {
+        return false;
+    }
+
+    if (image_encrypted)
+    {
+        return errmsg("Cannot read Hashes Table from encrypted image/device\n");
+    }
+
+    vector<u_int8_t> hashes_table_header_data(IMAGE_LAYOUT_HASHES_TABLE_HEADER_SIZE);
+
+    if (!_ioAccess->read(_hashes_table_ptr, hashes_table_header_data.data(), hashes_table_header_data.size()))
+    {
+        return errmsg("Hashes Table read error, %s\n", _ioAccess->err());
+    }
+
+    struct image_layout_hashes_table_header hashes_table_header;
+    image_layout_hashes_table_header_unpack(&hashes_table_header, hashes_table_header_data.data());
+
+    size = hashes_table_header.dw_size * 4 + HTOC::HTOC__HEADER_SIZE;
+
+    return true;
+}
+
+bool Fs5Operations::CheckBoot2(bool fullRead, const char* pref, VerifyCallBack verifyCallBackFunc)
 {
     DPRINTF(("FwOperations::CheckBoot2\n"));
     char* pr = new char[strlen(pref) + 512];
-    sprintf(pr, "%s /0x%08x/ (BOOT2)", pref, offs);
+    sprintf(pr, "%s /0x%08x/ (BOOT2)", pref, _boot2_ptr);
 
-    // Parse boot2 header
-    vector<u_int8_t> boot2HeaderData(FS5_IMAGE_LAYOUT_BOOT2_HEADER_GILBOA_SIZE);
-    if (!_ioAccess->read(offs, boot2HeaderData.data(), FS5_IMAGE_LAYOUT_BOOT2_HEADER_GILBOA_SIZE))
+    // Parse NCORE BCH for boot2 size
+    vector<u_int8_t> ncoreBCHData(FS5_IMAGE_LAYOUT_BOOT_COMPONENT_HEADER_SIZE);
+    if (!_ioAccess->read(_ncore_bch_ptr, ncoreBCHData.data(), FS5_IMAGE_LAYOUT_BOOT_COMPONENT_HEADER_SIZE))
     {
+        delete[] pr;
         return errmsg("%s - read error (%s)\n", "FS5 boot2 header", _ioAccess->err());
     }
-    // TODO - verify boot2 header CRC
-
-    fs5_image_layout_boot2_header_gilboa boot2Header;
-    fs5_image_layout_boot2_header_gilboa_unpack(&boot2Header, boot2HeaderData.data());
-    DPRINTF(("FwOperations::CheckBoot2 size = 0x%x\n", boot2Header.dw_size));
-    if (boot2Header.dw_size > 1048576 || boot2Header.dw_size < 4)
+    fs5_image_layout_boot_component_header ncoreBCH;
+    fs5_image_layout_boot_component_header_unpack(&ncoreBCH, ncoreBCHData.data());
+    
+    u_int32_t hashes_table_size = 0;
+    if (!GetHashesTableSize(hashes_table_size))
     {
-        report_callback(verifyCallBackFunc, "%s /0x%08x/ - unexpected size (0x%x)\n", pr, offs + 4,
-                        boot2Header.dw_size);
+        return false;
+    }
+    _fwImgInfo.boot2Size = __be32_to_cpu(ncoreBCH.stage1_components[0].u32_binary_len) - hashes_table_size;
+
+    DPRINTF(("FwOperations::CheckBoot2 size = 0x%x\n", _fwImgInfo.boot2Size));
+    if (_fwImgInfo.boot2Size > 1048576 || _fwImgInfo.boot2Size < 4)
+    {
+        report_callback(verifyCallBackFunc, "%s - unexpected size (0x%x)\n", pr, _fwImgInfo.boot2Size);
         delete[] pr;
         return errmsg("Boot2 invalid size\n");
     }
-    _fwImgInfo.boot2Size =
-      FS5_IMAGE_LAYOUT_BOOT2_HEADER_GILBOA_SIZE + (boot2Header.dw_size * 4) + 4; // header + payload + crc
 
-    u_int32_t boot2AbsAddr = _fwImgInfo.imgStart + offs;
+    u_int32_t boot2AbsAddr = _fwImgInfo.imgStart + _boot2_ptr;
     sprintf(pr, "%s /0x%08x-0x%08x (0x%06x)/ (BOOT2)", pref, boot2AbsAddr, boot2AbsAddr + _fwImgInfo.boot2Size - 1,
             _fwImgInfo.boot2Size);
 
@@ -157,35 +218,16 @@ bool Fs5Operations::CheckBoot2(u_int32_t offs, bool fullRead, const char* pref, 
         u_int32_t boot2SizeInDW = _fwImgInfo.boot2Size / 4;
         u_int32_t* buff = new u_int32_t[boot2SizeInDW];
         memset(buff, 0, (boot2SizeInDW) * sizeof(u_int32_t));
-        bool rc = readBufAux((*_ioAccess), offs, buff, _fwImgInfo.boot2Size, pr);
+        bool rc = readBufAux((*_ioAccess), _boot2_ptr, buff, _fwImgInfo.boot2Size, pr);
         if (!rc)
         {
             delete[] pr;
             delete[] buff;
             return rc;
         }
-        UpdateImgCache((u_int8_t*)buff, offs, _fwImgInfo.boot2Size);
-
-        u_int32_t crc_calc =
-          calc_hw_crc((u_int8_t*)buff + FS5_IMAGE_LAYOUT_BOOT2_HEADER_GILBOA_SIZE, boot2Header.dw_size * 4);
-        TOCPUn(buff, boot2SizeInDW);
-        u_int32_t crc_act = buff[boot2SizeInDW - 1];
+        UpdateImgCache((u_int8_t*)buff, _boot2_ptr, _fwImgInfo.boot2Size);
         delete[] buff;
-        if (crc_calc != crc_act)
-        {
-            DPRINTF(("FwOperations::CheckBoot2 wrong CRC (exp:0x%x, act:0x%x)\n", crc_calc, crc_act));
-            report_callback(verifyCallBackFunc, "%s /0x%08x/ - wrong CRC (exp:0x%x, act:0x%x)\n", pr, offs, crc_calc,
-                            crc_act);
-            if (!_fwParams.ignoreCrcCheck)
-            {
-                delete[] pr;
-                return errmsg(MLXFW_BAD_CRC_ERR, BAD_CRC_MSG);
-            }
-        }
-        else
-        {
-            report_callback(verifyCallBackFunc, "%s - OK\n", pr);
-        }
+        report_callback(verifyCallBackFunc, "%s - CRC IGNORED\n", pr);
     }
     delete[] pr;
     return true;
@@ -198,7 +240,7 @@ bool Fs5Operations::CheckBoot2(u_int32_t,
                                const char* pref,
                                VerifyCallBack verifyCallBackFunc)
 {
-    return CheckBoot2(offs, fullRead, pref, verifyCallBackFunc);
+    return CheckBoot2(fullRead, pref, verifyCallBackFunc);
 }
 
 bool Fs5Operations::FsVerifyAux(VerifyCallBack verifyCallBackFunc,
@@ -333,6 +375,10 @@ bool Fs5Operations::FsVerifyAux(VerifyCallBack verifyCallBackFunc,
     _ioAccess->set_address_convertor(0, 0);
     //-Verify DToC Header:
     u_int32_t dtocPtr = _ioAccess->get_effective_size() - FS4_DEFAULT_SECTOR_SIZE;
+    if (!GetDtocAddress(dtocPtr))
+    {
+        return false;
+    }
     DPRINTF(("Fs5Operations::FsVerifyAux call verifyTocHeader() DTOC\n"));
     if (!verifyTocHeader(dtocPtr, true, verifyCallBackFunc))
     {
@@ -353,5 +399,175 @@ bool Fs5Operations::FsVerifyAux(VerifyCallBack verifyCallBackFunc,
 bool Fs5Operations::FwQuery(fw_info_t* fwInfo, bool, bool, bool quickQuery, bool ignoreDToc, bool verbose)
 {
     DPRINTF(("Fs5Operations::FwQuery\n"));
-    return encryptedFwQuery(fwInfo, quickQuery, ignoreDToc, verbose);
+    if (!encryptedFwQuery(fwInfo, quickQuery, ignoreDToc, verbose))
+    {
+        return errmsg("%s", err());
+    }
+
+    return NCoreQuery(fwInfo);
+}
+
+bool Fs5Operations::NCoreQuery(fw_info_t* fwInfo)
+{
+    fs5_image_layout_boot_component_header ncoreBCH;
+    memset(&ncoreBCH, 0, sizeof(ncoreBCH));
+
+    vector<u_int8_t> ncoreData(BCH_SIZE_IN_BYTES);
+    if (!_ioAccess->read(_ncore_bch_ptr, ncoreData.data(), BCH_SIZE_IN_BYTES))
+    {
+        return errmsg("FS5 NCORE - read error (%s)\n", _ioAccess->err());
+    }
+    TOCPUn(ncoreData.data(), BCH_SIZE_IN_BYTES / 4);
+    fs5_image_layout_boot_component_header_unpack(&ncoreBCH, ncoreData.data());
+
+    // if there's a signature (at least one byte that's not 0x0 or 0xff), we assume that the whole image is signed
+    auto compareFunc = [](u_int8_t byte) { return byte != 0x0 && byte != 0xff; };
+    if (std::find_if(begin(ncoreBCH.u8_stage1_signature.u8_dummy), end(ncoreBCH.u8_stage1_signature.u8_dummy),
+                     compareFunc) != end(ncoreBCH.u8_stage1_signature.u8_dummy))
+    {
+        if (fwInfo->fw_info.sku == device_sku::PRE_PROD_IPN || fwInfo->fw_info.sku == device_sku::SECURE_IPN)
+        {
+            fwInfo->fs3_info.security_mode &= ~SMM_DEV_FW;
+            fwInfo->fs3_info.security_mode |= SMM_DEV_FW;
+        }
+    }
+
+    string magicPattern(reinterpret_cast<const char*>(ncoreBCH.u8_header_magic), 4);
+    if (magicPattern == "ADVN") // magic pattern is reversed to fit FW array parsing
+    {
+        DPRINTF(("Fs5Operations::NCoreQuery fetching debug and encryption indications\n"));
+        fwInfo->fs3_info.security_mode &= ~SMM_DEBUG_FW;
+        fwInfo->fs3_info.security_mode |= (ncoreBCH.stage1_components[0].flags.is_debug == 1) ? SMM_DEBUG_FW : 0;
+        fwInfo->fw_info.encrypted_fw = ncoreBCH.stage1_components[0].flags.is_encrypted ? 2 : 0;
+    }
+
+    return true;
+}
+
+bool Fs5Operations::FwExtract4MBImage(vector<u_int8_t>& img,
+                                      bool maskMagicPatternAndDevToc,
+                                      bool verbose,
+                                      bool ignoreImageStart,
+                                      bool imageSizeOnly)
+{
+    bool res = Fs4Operations::FwExtract4MBImage(img, maskMagicPatternAndDevToc, verbose, ignoreImageStart);
+
+    if (res && !imageSizeOnly)
+    {
+        //* Get image size
+        u_int32_t burn_image_size;
+        if (!GetEncryptedImageSizeFromImageInfo(&burn_image_size))
+        {
+            return errmsg("%s", err());
+        }
+
+        vector<u_int8_t> bch(BCH_SIZE_IN_BYTES + 1, 0);
+        if (!_ioAccess->read(burn_image_size, bch.data(), BCH_SIZE_IN_BYTES))
+        {
+            return errmsg("Image - read error (%s)\n", _ioAccess->err());
+        }
+
+        string magicPattern(reinterpret_cast<const char*>(bch.data()), 4);
+        if (magicPattern == "NVDA")
+        {
+            img.resize(img.size() + BCH_SIZE_IN_BYTES);
+
+            std::copy(begin(bch), end(bch), begin(img) + burn_image_size);
+        }
+    }
+
+    return res;
+}
+
+bool Fs5Operations::GetDtocAddress(u_int32_t& dTocAddress)
+{
+    ParseImageInfoFromEncryptedImage();
+    u_int32_t imageSize = _ioAccess->get_effective_size();
+    bool isSigned = false;
+
+    if (!IsSecureFwUpdateSigned(isSigned))
+    {
+        return false;
+    }
+
+    if (isSigned)
+    {
+        imageSize -= BCH_SIZE_IN_BYTES;
+    }
+
+    if (_fwImgInfo.ext_info.dtoc_offset != 0)
+    {
+        dTocAddress = (imageSize / (_fwImgInfo.ext_info.dtoc_offset * 2)) - FS4_DEFAULT_SECTOR_SIZE;
+    }
+    else
+    {
+        dTocAddress = imageSize - FS4_DEFAULT_SECTOR_SIZE;
+    }
+
+    return true;
+}
+
+bool Fs5Operations::IsSecureFwUpdateSigned(bool& isSigned)
+{
+    u_int32_t imageSize = _ioAccess->get_effective_size();
+    const u_int32_t smallestSupportedImageSize = 0x40000;
+
+    if ((imageSize % smallestSupportedImageSize) != 0) // Check if there's an encapsulation header
+    {
+        vector<u_int8_t> bchHeaderMagic(5, 0);
+        u_int32_t log2_chunk_size = _ioAccess->get_log2_chunk_size();
+        bool is_image_in_odd_chunks = _ioAccess->get_is_image_in_odd_chunks();
+
+        _ioAccess->set_address_convertor(0, 0);
+        if (!_ioAccess->read(imageSize - BCH_SIZE_IN_BYTES, bchHeaderMagic.data(), 4))
+        {
+            return errmsg("Image - read error (%s)\n", _ioAccess->err());
+        }
+        _ioAccess->set_address_convertor(log2_chunk_size, is_image_in_odd_chunks);
+
+        if (string(reinterpret_cast<const char*>(bchHeaderMagic.data())) == "NVDA")
+        {
+            isSigned = true;
+        }
+        else
+        {
+            isSigned = false;
+        }
+    }
+
+    return true;
+}
+
+bool Fs5Operations::GetMfgInfo(u_int8_t* buff)
+{
+    bool rc = Fs4Operations::GetMfgInfo(buff);
+    if (rc != false)
+    {
+        if (_fwImgInfo.supportedHwId[0] == ARCUSE_HW_ID)
+        { // ArcusE is missing DEV_INFO section, align non-orig guids to make flint query output correct format
+            memcpy(&_fs3ImgInfo.ext_info.fs3_uids_info.image_layout_uids,
+                   &_fs3ImgInfo.ext_info.orig_fs3_uids_info.image_layout_uids,
+                   sizeof(_fs3ImgInfo.ext_info.orig_fs3_uids_info.image_layout_uids));
+            _fs3ImgInfo.ext_info.fs3_uids_info.guid_format = IMAGE_LAYOUT_UIDS;
+        }
+    }
+    return rc;
+}
+
+bool Fs5Operations::CheckAndDealWithChunkSizes(u_int32_t cntxLog2ChunkSize, u_int32_t imageCntxLog2ChunkSize)
+{
+    if (cntxLog2ChunkSize > 0x19)
+    {
+        return errmsg("Unsupported Device partition size 0x%x", cntxLog2ChunkSize);
+    }
+    if (imageCntxLog2ChunkSize > 0x19)
+    {
+        return errmsg("Unsupported Image partition size 0x%x", imageCntxLog2ChunkSize);
+    }
+    if (cntxLog2ChunkSize != imageCntxLog2ChunkSize)
+    {
+        return errmsg("Device and Image partition size differ(0x%x/0x%x), use non failsafe (-nofs) burn flow.",
+                      cntxLog2ChunkSize, imageCntxLog2ChunkSize);
+    }
+    return true;
 }

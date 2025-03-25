@@ -52,6 +52,7 @@
 #endif
 
 #include <signal.h>
+#include "mft_utils/crc16.h"
 #include "tools_version.h"
 
 #ifndef __WIN__
@@ -361,6 +362,12 @@ typedef enum fs3_section
     FS3_ACE_CODE = 0x15,
     FS3_ROM_CODE = 0x18,
     FS3_RESET_INFO = 0x20,
+    FS4_PROG_FW_META = 0x21,
+    FS4_PROG_FW_BIN = 0x22,
+    FS4_PRE_LINK_CODE = 0x2a,
+    FS4_PRE_LINK_DATA = 0x2b,
+    FS4_POST_LINK_CODE = 0x2c,
+    FS4_POST_LINK_DATA = 0x2d,
     FS3_DBG_FW_INI = 0x30,
     FS3_DBG_FW_PARAMS = 0x32,
     FS3_FW_ADB = 0x33,
@@ -368,6 +375,7 @@ typedef enum fs3_section
     FS4_TILE_FW_CODE = 0x35,
     FS4_FW_TILE_INI = 0x36,
     FS4_HW_TILE_INI = 0x37,
+    FS4_SLOT_DEPENDENT_INI = 0x40,
     FS3_IMAGE_SIGNATURE_256 = 0xa0,
     FS3_PUBLIC_KEYS_2048 = 0xa1,
     FS3_FORBIDDEN_VERSIONS = 0xa2,
@@ -376,9 +384,18 @@ typedef enum fs3_section
     FS3_HMAC_DIGEST = 0xa5,
     FS4_RSA_PUBLIC_KEY = 0xa6,
     FS4_RSA_4096_SIGNATURES = 0xa7,
+    FS4_ENCRYPTION_KEY_TRANSITION = 0xa9,
+    FS4_PXIR_INI = 0xaa,
+    FS4_PXIR_INI1 = 0xab,
+    FS4_NVDA_ROT_CERTIFICATES = 0xad,
     FS4_EXCLKSYNC_INFO = 0xb0,
     FS4_MAIN_HASHES_PAGES = 0xb1,
     FS4_MAIN_LOCKED_HASHES_PAGES = 0xb2,
+    FS4_STRN_MAIN = 0xb4,
+    FS4_STRN_IRON = 0xb5,
+    FS4_STRN_TILE = 0xb6,
+    FS4_MAIN_DATA = 0xd3,
+    FS4_FW_DEBUG_DUMP_2 = 0xd4,
     FS3_MFG_INFO = 0xe0,
     FS3_DEV_INFO = 0xe1,
     FS3_NV_DATA1 = 0xe2,
@@ -398,10 +415,16 @@ typedef enum fs3_section
     FS4_LC_INI2_TABLE = 0xf0,
     FS4_LC_INI_NV_DATA = 0xf1,
     FS4_CERT_CHAIN_0 = 0xf2,
+    FS5_SECURITY_LOG = 0xd5,
     FS4_DIGITAL_CACERT_RW = 0xf3,
+    FS4_CERTIFICATE_CHAINS_1 = 0xf4,
+    FS4_CERTIFICATE_CHAINS_2 = 0xf5,
+    FS4_ROOT_CERTIFICATES_1 = 0xf6,
+    FS4_ROOT_CERTIFICATES_2 = 0xf7,
+    FS4_TOOLS_AREA = 0xf9,
     FS4_HASHES_TABLE = 0xfa,
     FS4_HW_PTR = 0xfb,
-    FS4_TOOLS_AREA = 0xfc,
+    FS4_FW_DEBUG_DUMP = 0xfc,
     FS3_ITOC = 0xfd,
     FS3_DTOC = 0xfe,
     FS3_END = 0xff,
@@ -534,28 +557,6 @@ protected:
 private:
     char* _err;
     int _errCode;
-};
-
-////////////////////////////////////////////////////////////////////////
-//                                                                    //
-// ****************************************************************** //
-//                        CRC16 CALCULATION                           //
-// ****************************************************************** //
-//                                                                    //
-////////////////////////////////////////////////////////////////////////
-class Crc16
-{
-public:
-    Crc16(bool d = false) : _debug(d) { clear(); }
-    u_int16_t get() { return _crc; }
-    void clear() { _crc = 0xffff; }
-    void operator<<(u_int32_t val) { add(val); }
-    void add(u_int32_t val);
-    void finish();
-
-private:
-    u_int16_t _crc;
-    bool _debug;
 };
 
 class u_int32_ba

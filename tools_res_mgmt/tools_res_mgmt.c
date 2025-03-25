@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2013-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -34,10 +34,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <common/tools_utils.h>
-#include <common/bit_slice.h>
-#include <common/compatibility.h>
-#include <dev_mgt/tools_dev_types.h>
+#include "common/tools_utils.h"
+#include "common/bit_slice.h"
+#include "common/compatibility.h"
+#include "common/tools_time.h"
+#include "dev_mgt/tools_dev_types.h"
 
 #if !defined(__FreeBSD__) && !defined(UEFI_BUILD)
 #include <mtcr_ib_res_mgt.h>
@@ -170,7 +171,12 @@ static struct device_sem_info g_dev_sem_info_db[] = {
   },
   {
     DeviceConnectX8, // dev_id
-    {0xe5660},       // hw_sem_addr
+    {0x54a80},       // hw_sem_addr
+    1,               // vsec_sem_supported
+  },
+  {
+    DeviceConnectX9, // dev_id
+    {0x57680},       // hw_sem_addr
     1,               // vsec_sem_supported
   },
   {
@@ -195,17 +201,37 @@ static struct device_sem_info g_dev_sem_info_db[] = {
   },
   {
     DeviceQuantum3, // dev_id
-    {0xe74e0},      // hw_sem_addr find correct one for 0x25b
+    {0x1550f8},     // hw_sem_addr
     1,              // vsec_sem_supported
   },
   {
-    DeviceBW00, // dev_id
+    DeviceQuantum4, // dev_id
+    {0x1550f8},     // hw_sem_addr
+    1,              // vsec_sem_supported
+  },
+  {
+    DeviceArcusE, // dev_id
+    {0x1478f8},   // hw_sem_addr
+    0,            // vsec_sem_supported
+  },
+  {
+    DeviceGB100, // dev_id
     {0xe74e0},   // hw_sem_addr find correct one for 0x2900
     1,           // vsec_sem_supported
   },
   {
     DeviceSpectrum4, // dev_id
-    {0xa68f8},       // hw_sem_addr
+    {0xa52f8},       // hw_sem_addr
+    1,               // vsec_sem_supported
+  },
+  {
+    DeviceSpectrum5, // dev_id
+    {0xa52f8},       // hw_sem_addr
+    1,               // vsec_sem_supported
+  },
+  {
+    DeviceSpectrum6, // dev_id
+    {0xb50f8},       // hw_sem_addr
     1,               // vsec_sem_supported
   },
   {
@@ -467,8 +493,8 @@ static struct device_sem_info* get_device_sem_info(dm_dev_id_t dev_id)
 trm_sts trm_create(trm_ctx* trm_p, mfile* mf)
 {
     dm_dev_id_t dev_id = DeviceStartMarker;
-    u_int32_t hw_dev_id;
-    u_int32_t chip_rev;
+    u_int32_t hw_dev_id = 0;
+    u_int32_t chip_rev = 0;
 
     *trm_p = (trm_ctx)malloc(sizeof(struct trm_t));
     if (!(*trm_p))

@@ -77,6 +77,28 @@
         }                                                                                       \
     } while (0)
 
+#define RESIGN_MSG "-W- The image requires to be signed by a valid key, run sign command before applying.\n"
+
+#define INSERT_SHA_IF_NEEDS(callBackF)                                            \
+    do                                                                            \
+    {                                                                             \
+        if (!_ioAccess->is_flash())                                               \
+        {                                                                         \
+            if (!(_fs3ImgInfo.ext_info.security_mode & SMM_SIGNED_FW))            \
+            {                                                                     \
+                PRINT_PROGRESS(callBackF, (char*)"-I- Updating image digest.\n"); \
+                if (!FwInsertSHA256((PrintCallBack)NULL))                         \
+                {                                                                 \
+                    return false;                                                 \
+                }                                                                 \
+            }                                                                     \
+            else                                                                  \
+            {                                                                     \
+                PRINT_PROGRESS(callBackF, (char*)RESIGN_MSG);                     \
+            }                                                                     \
+        }                                                                         \
+    } while (0)
+
 #define DEFAULT_GUID_NUM 0xffff
 #define DEFAULT_STEP 0xff
 
@@ -163,7 +185,8 @@ public:
     virtual bool FwExtract4MBImage(vector<u_int8_t>& img,
                                    bool maskMagicPatternAndDevToc,
                                    bool verbose = false,
-                                   bool ignoreImageStart = false);
+                                   bool ignoreImageStart = false,
+                                   bool imageSizeOnly = false);
     virtual bool GetImageDataForSign(MlxSign::SHAType shaType, vector<u_int8_t>& img);
     virtual bool FwSetPublicKeys(char* fname, PrintCallBack callBackFunc = (PrintCallBack)NULL);
     virtual bool FwSetForbiddenVersions(char* fname, PrintCallBack callBackFunc = (PrintCallBack)NULL);
@@ -229,9 +252,9 @@ protected:
       GetImageInfoFromSection(u_int8_t* buff, u_int8_t sect_type, u_int32_t sect_size, u_int8_t check_support_only = 0);
     bool IsGetInfoSupported(u_int8_t sect_type);
     bool IsFs3SectionReadable(u_int8_t type, QueryOptions queryOptions);
-    bool GetMfgInfo(u_int8_t* buff);
+    virtual bool GetMfgInfo(u_int8_t* buff);
     bool GetDevInfo(u_int8_t* buff);
-    bool GetImageInfo(u_int8_t* buff);
+    virtual bool GetImageInfo(u_int8_t* buff);
     bool GetRomInfo(u_int8_t* buff, u_int32_t size);
     bool GetImgSigInfo(u_int32_t keypair_uuid[4]);
     bool GetImgSigInfo256(u_int8_t* buff);
@@ -271,7 +294,7 @@ protected:
                                     bool silent = false);
     bool Fs3UpdateForbiddenVersionsSection(unsigned int size, char* publicKeys, std::vector<u_int8_t>& newSectionData);
 
-    bool CheckAndDealWithChunkSizes(u_int32_t cntxLog2ChunkSize, u_int32_t imageCntxLog2ChunkSize);
+    virtual bool CheckAndDealWithChunkSizes(u_int32_t cntxLog2ChunkSize, u_int32_t imageCntxLog2ChunkSize);
     bool ReBurnCurrentImage(ProgressCallBack progressFunc);
     bool RemoveWriteProtection();
     bool Fs3MemSetSignature(fs3_section_t sectType, u_int32_t size, PrintCallBack printFunc = (PrintCallBack)NULL);
@@ -302,6 +325,7 @@ protected:
         u_int32_t smallestAbsAddr;
         u_int32_t sizeOfImgData;
         bool runFromAny;
+        u_int8_t logStep;
     };
 
     static const SectionInfo _fs3SectionsInfoArr[];

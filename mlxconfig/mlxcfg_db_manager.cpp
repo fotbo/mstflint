@@ -40,14 +40,13 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-//#define NDEBUG //uncomment in order to enable asserts
+// #define NDEBUG //uncomment in order to disable asserts
 #include <assert.h>
 
 #include <ext_libs/sqlite/sqlite3.h>
 #include "mlxcfg_db_manager.h"
 #include "mlxcfg_utils.h"
 #include <memory>
-
 // clang-format off
 #define SQL_SELECT_ALL_TLVS \
     "SELECT * FROM tlvs"

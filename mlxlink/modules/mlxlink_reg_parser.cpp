@@ -36,15 +36,17 @@
 
 MlxlinkRegParser::MlxlinkRegParser() : RegAccessParser("", "", "", NULL, 0)
 {
-    _mf = NULL;
-    _regLib = NULL;
+    _mf = nullptr;
+    _regLib = nullptr;
     _gvmiAddress = 0;
 
     _localPort = 0;
     _portType = 0;
     _pnat = 0;
+    _planeInd = -1;
 
     _isHCA = false;
+    _isSwControled = false;
 }
 
 MlxlinkRegParser::~MlxlinkRegParser() {}
@@ -129,7 +131,7 @@ void MlxlinkRegParser::updateWithDefault(const string& fieldName, const string& 
     }
 }
 
-void MlxlinkRegParser::setDefaultFields(const string& fieldsStr)
+void MlxlinkRegParser::setDefaultFields(const string& regName, const string& fieldsStr)
 {
     updateWithDefault("local_port", fieldsStr, _localPort);
     updateWithDefault("pnat", fieldsStr, _pnat);
@@ -138,13 +140,20 @@ void MlxlinkRegParser::setDefaultFields(const string& fieldsStr)
     {
         updateWithDefault("port_type", fieldsStr, _portType);
     }
+
+    // Some registers need to have another indication for localport 255 to deal with it as a localport by setting lp_gl
+    // field
+    if (regName == ACCESS_REG_PPCNT && _localPort == 255)
+    {
+        updateWithDefault("lp_gl", fieldsStr, 1);
+    }
 }
 
 void MlxlinkRegParser::sendPrmReg(const string& regName, maccess_reg_method_t method)
 {
     resetParser(regName);
 
-    setDefaultFields("");
+    setDefaultFields(regName, "");
 
     genBuffSendRegister(regName, method);
 }
@@ -171,14 +180,14 @@ void MlxlinkRegParser::sendPrmReg(const string& regName, maccess_reg_method_t me
         updateField(fieldName, fieldValue);
     }
 
-    setDefaultFields(fieldsStr);
+    setDefaultFields(regName, fieldsStr);
 
     genBuffSendRegister(regName, method);
 }
 
-string MlxlinkRegParser::getFieldStr(const string& field)
+string MlxlinkRegParser::getFieldStr(const string& field, const u_int32_t size)
 {
-    return to_string(getFieldValue(field));
+    return to_string(getFieldValue(field, size));
 }
 
 string MlxlinkRegParser::getRawFieldValueStr(const string fieldName)
@@ -211,9 +220,9 @@ string MlxlinkRegParser::getRawFieldValueStr(const string fieldName)
     return fullStr;
 }
 
-u_int32_t MlxlinkRegParser::getFieldValue(string field_name)
+u_int32_t MlxlinkRegParser::getFieldValue(string field_name, u_int32_t size)
 {
-    return RegAccessParser::getFieldValue(field_name, _buffer);
+    return RegAccessParser::getFieldValue(field_name, _buffer, size);
 }
 
 u_int32_t MlxlinkRegParser::getFieldSize(string field_name)

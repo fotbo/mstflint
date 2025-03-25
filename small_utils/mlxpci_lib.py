@@ -70,13 +70,15 @@ CAP_PHYSICAL_LAYER_GEN4 = 0x26
 CAP_DPC = 0x1d
 CAP_ACS = 0xd
 CAP_ATS = 0xf
+CAP_PTM = 0x1f
 # Key:ID, value:size
 CAP_EXTENDED_DICT = {CAP_AER: 0x48,
                      CAP_SRIOV: 0x40,
                      CAP_SECONDRY_PCI_EXPRESS: 0x10,
                      CAP_PHYSICAL_LAYER_GEN4: 0x40,
                      CAP_DPC: 0x40,
-                     CAP_ATS: 0x8
+                     CAP_ATS: 0x8,
+                     CAP_PTM: 0xc
                      }
 
 
@@ -167,7 +169,7 @@ class PCIDeviceBase(object):
             self._pci_conf_space = {}
         self.logger.info("PCI Configurations for [{0} was saved successfully]".format(self.dbdf))
 
-    def restore_configuration_space(self):
+    def restore_configuration_space(self, skip_recovery_vsec=True):
         """
         Restore PCI configuration space of the device
         """
@@ -176,6 +178,9 @@ class PCIDeviceBase(object):
             self._pci_conf_space = self._get_pci_conf_from_file()
 
         visited_capabilities = []  # Save the visited capability to avoid infinit loop
+        
+        # Set skip_offset_list based on the skip_recovery_vsec flag
+        excluded_offsets = MELLANOX_PCI_SKIP_LIST if skip_recovery_vsec else None
 
         # Read and save PCI configuration space offset from 0x0-0xfff
         # Reading the pci conf space one time to have better performance

@@ -189,6 +189,10 @@ string IBSupportedSpeeds2Str(u_int32_t mask)
 {
     string maskStr = "";
 
+    if (mask & IB_LINK_SPEED_XDR)
+    {
+        maskStr += "XDR,";
+    }
     if (mask & IB_LINK_SPEED_NDR)
     {
         maskStr += "NDR,";
@@ -284,6 +288,22 @@ string EthSupportedSpeeds2Str(u_int32_t int_mask)
 string EthExtSupportedSpeeds2Str(u_int32_t int_mask)
 {
     string maskStr = "";
+    if (int_mask & ETH_LINK_SPEED_EXT_200GAUI_1)
+    {
+        maskStr += "200G_1X,";
+    }
+    if (int_mask & ETH_LINK_SPEED_EXT_400GAUI_2)
+    {
+        maskStr += "400G_2X,";
+    }
+    if (int_mask & ETH_LINK_SPEED_EXT_800GAUI_4)
+    {
+        maskStr += "800G_4X,";
+    }
+    if (int_mask & ETH_LINK_SPEED_EXT_1_6TAUI_8)
+    {
+        maskStr += "1600G_8X,";
+    }
     if (int_mask & ETH_LINK_SPEED_EXT_800GAUI_8)
     {
         maskStr += "800G_8X,";
@@ -362,11 +382,18 @@ string EthExtSupportedSpeeds2Str(u_int32_t int_mask)
 
 string SupportedSpeeds2Str(u_int32_t proto_active, u_int32_t mask, bool extended)
 {
-    if (extended && proto_active == ETH)
+    switch (proto_active)
     {
-        return EthExtSupportedSpeeds2Str(mask);
+        case IB:
+            return IBSupportedSpeeds2Str(mask);
+        case ETH:
+            if (extended)
+            {
+                return EthExtSupportedSpeeds2Str(mask);
+            }
     }
-    return proto_active == IB ? IBSupportedSpeeds2Str(mask) : EthSupportedSpeeds2Str(mask);
+
+    return EthSupportedSpeeds2Str(mask);
 }
 
 string getOui(u_int32_t oui)
@@ -593,6 +620,10 @@ int ptysSpeedToMaskIB(const string& speed)
     {
         return IB_LINK_SPEED_NDR;
     }
+    if (speed == "XDR")
+    {
+        return IB_LINK_SPEED_XDR;
+    }
     return 0x0;
 }
 
@@ -609,7 +640,7 @@ bool isPAM4Speed(u_int32_t activeSpeed, u_int32_t protoActive, bool extended)
     }
     else if (protoActive == IB)
     {
-        if (activeSpeed == IB_LINK_SPEED_HDR || activeSpeed == IB_LINK_SPEED_NDR)
+        if (activeSpeed == IB_LINK_SPEED_HDR || activeSpeed == IB_LINK_SPEED_NDR || activeSpeed == IB_LINK_SPEED_XDR)
         {
             pam4Signal = true;
         }
@@ -709,55 +740,6 @@ bool checkPplrCmd(const string& pplrCmd)
     return true;
 }
 
-string prbsMaskToLaneRate(u_int32_t mask)
-{
-    if (mask == PRBS_SDR)
-    {
-        return "2.5G";
-    }
-    if (mask == PRBS_DDR)
-    {
-        return "5G";
-    }
-    if (mask == PRBS_QDR)
-    {
-        return "10G";
-    }
-    if (mask == PRBS_FDR10)
-    {
-        return "10.3125G";
-    }
-    if (mask == PRBS_FDR)
-    {
-        return "14.0625G";
-    }
-    if (mask == PRBS_EDR)
-    {
-        return "25.78125G";
-    }
-    if (mask == PRBS_HDR)
-    {
-        return "53.125G";
-    }
-    if (mask == PRBS_NDR)
-    {
-        return "106.25G";
-    }
-    if (mask == PRBS_1G)
-    {
-        return "1.25G";
-    }
-    if (mask == PRBS_XAUI)
-    {
-        return "3.125G";
-    }
-    if (mask == PRBS_50G)
-    {
-        return "12.89G";
-    }
-    return "N/A";
-}
-
 u_int32_t prbsMaskToRateNum(u_int32_t mask)
 {
     if (mask == PRBS_SDR)
@@ -792,6 +774,10 @@ u_int32_t prbsMaskToRateNum(u_int32_t mask)
     {
         return 400;
     }
+    if (mask == PRBS_XDR)
+    {
+        return 800;
+    }
     if (mask == PRBS_1G)
     {
         return 1;
@@ -805,83 +791,6 @@ u_int32_t prbsMaskToRateNum(u_int32_t mask)
         return 12;
     }
     return 0;
-}
-
-bool prbsLaneRateCheck(const string& rate)
-{
-    if (rate == "SDR" || rate == "IB-SDR")
-    {
-        return true;
-    }
-    if (rate == "DDR" || rate == "IB-DDR" || rate == "5G")
-    {
-        return true;
-    }
-    if (rate == "QDR" || rate == "IB-QDR")
-    {
-        return true;
-    }
-    if (rate == "FDR10" || rate == "IB-FDR10" || rate == "10G" || rate == "40G")
-    {
-        return true;
-    }
-    if (rate == "FDR" || rate == "IB-FDR" || rate == "14G")
-    {
-        return true;
-    }
-    if (rate == "EDR" || rate == "IB-EDR" || rate == "25G" || rate == "50G" || rate == "100G" || rate == "50G_2X" ||
-        rate == "100G_4X")
-    {
-        return true;
-    }
-    if (rate == "HDR" || rate == "IB-HDR" || rate == "200G_4X" || rate == "50G_1X" || rate == "100G_2X" ||
-        rate == "400G_8X")
-    {
-        return true;
-    }
-    if (rate == "NDR" || rate == "IB-NDR" || rate == "100G_1X" || rate == "200G_2X" || rate == "400G_4X" ||
-        rate == "800G_8X")
-    {
-        return true;
-    }
-    if (rate == "1G")
-    {
-        return true;
-    }
-    if (rate == "XAUI" || rate == "2.5G")
-    {
-        return true;
-    }
-    if (rate == "50GE-KR4" || rate == "12.89G")
-    {
-        return true;
-    }
-    if (rate == "")
-    {
-        return true;
-    }
-    return false;
-}
-
-string prbsMaskToTuningStatus(u_int32_t mask)
-{
-    if (mask == PRBS_TUNING_NOT_PERFORMED)
-    {
-        return "PRBS mode tuning was not performed.";
-    }
-    if (mask == PRBS_TUNING_PERFORMING)
-    {
-        return "Performing PRBS mode tuning.";
-    }
-    if (mask == PRBS_TUNING_COMPLETE)
-    {
-        return "PRBS mode tuning completed.";
-    }
-    if (mask == PRBS_SIGNAL_DETECT)
-    {
-        return "Signal Detect in progress.";
-    }
-    return "N/A";
 }
 
 string prbsMaskToLockStatus(u_int32_t mask, u_int32_t numOfLanesToUse)
@@ -1376,6 +1285,26 @@ double mw_to_dbm(double x)
     return 10 * log10(x);
 }
 
+string floatToStr(float num, int resolution)
+{
+    char fmt[32];
+
+    if (!(num - static_cast<int>(num)))
+    {
+        snprintf(fmt, sizeof(fmt), "%.0f", num);
+    }
+    else if (resolution < 0)
+    {
+        snprintf(fmt, sizeof(fmt), "%f", num);
+    }
+    else
+    {
+        snprintf(fmt, sizeof(fmt), "%.*f", resolution, num);
+    }
+
+    return string(fmt);
+}
+
 int readSigned(u_int32_t value, u_int32_t fieldSize)
 {
     u_int32_t signMask = (u_int32_t)pow(2.0, (1.0 * fieldSize) - 1);
@@ -1435,41 +1364,45 @@ void setPrintTitle(MlxlinkCmdPrint& mlxlinkCmdPrint, string title, u_int32_t siz
 
 bool isSpeed25GPerLane(u_int32_t speed, u_int32_t protocol)
 {
-    bool valid = true;
-    if ((protocol == IB && speed != IB_LINK_SPEED_EDR) ||
-        (protocol == ETH &&
-         (speed != ETH_LINK_SPEED_100G_CR4 && speed != ETH_LINK_SPEED_100G_KR4 && speed != ETH_LINK_SPEED_100G_LR4 &&
-          speed != ETH_LINK_SPEED_100G_SR4 && speed != ETH_LINK_SPEED_50G_KR2 && speed != ETH_LINK_SPEED_50G_SR2 &&
-          speed != ETH_LINK_SPEED_50G_CR2 && speed != ETH_LINK_SPEED_25G_CR && speed != ETH_LINK_SPEED_25G_KR &&
-          speed != ETH_LINK_SPEED_25G_SR && speed != ETH_LINK_SPEED_50G_KR4)))
+    if (protocol == IB)
     {
-        valid = false;
+        return speed & IB_LINK_SPEED_EDR;
     }
-    return valid;
+    return (speed & ETH_LINK_SPEED_25G_LANE);
 }
 
 bool isSpeed50GPerLane(u_int32_t speed, u_int32_t protocol)
 {
-    bool valid = true;
-    if ((protocol == IB && speed != IB_LINK_SPEED_HDR) ||
-        (protocol == ETH && (speed != ETH_LINK_SPEED_EXT_50GAUI_1 && speed != ETH_LINK_SPEED_EXT_100GAUI_2 &&
-                             speed != ETH_LINK_SPEED_EXT_200GAUI_4 && speed != ETH_LINK_SPEED_EXT_400GAUI_8)))
+    if (protocol == IB)
     {
-        valid = false;
+        return speed & IB_LINK_SPEED_HDR;
     }
-    return valid;
+    return (speed & ETH_LINK_SPEED_50G_LANE);
 }
 
 bool isSpeed100GPerLane(u_int32_t speed, u_int32_t protocol)
 {
-    bool valid = true;
-    if ((protocol == IB && speed != IB_LINK_SPEED_NDR) ||
-        (protocol == ETH && (speed != ETH_LINK_SPEED_EXT_100GAUI_1 && speed != ETH_LINK_SPEED_EXT_200GAUI_2 &&
-                             speed != ETH_LINK_SPEED_EXT_400GAUI_4 && speed != ETH_LINK_SPEED_EXT_800GAUI_8)))
+    if (protocol == IB)
     {
-        valid = false;
+        return speed & IB_LINK_SPEED_NDR;
     }
-    return valid;
+    return (speed & ETH_LINK_SPEED_100G_LANE);
+}
+
+bool isSpeed200GPerLane(u_int32_t speed, u_int32_t protocol)
+{
+    (void)protocol;
+    return (speed & LINK_SPEED_200G_LANE);
+}
+
+bool isNRZSpeed(u_int32_t speed, u_int32_t protocol)
+{
+    // this twisted condition was made due to 100G per lane and 25G per lane share a mutual bit (19) and causes the 100G
+    // per lane to be recognized as 25G per lane.
+    return !isSpeed100GPerLane(speed, protocol) &&
+           (isSpeed25GPerLane(speed, protocol) ||
+            !(isSpeed50GPerLane(speed, protocol) || isSpeed100GPerLane(speed, protocol) ||
+              isSpeed200GPerLane(speed, protocol) || isSpeed25GPerLane(speed, protocol)));
 }
 
 string linkWidthMaskToStr(u_int32_t width)

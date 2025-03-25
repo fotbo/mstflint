@@ -41,26 +41,32 @@
 #define MLXCFG_COMMANDER_H_
 
 #include <vector>
+#include "tools_dev_types.h"
 #include "mlxcfg_view.h"
 #include "mlxcfg_utils.h"
+#include "mlxcfg_status.h"
 
 class Commander
 {
 public:
     static Commander* create(std::string device,
                              std::string dbName,
-                             bool forceCreate = false); // clients can force create skiping any support check, and move
-                                                        // the responsebility to the client.
-    static Commander* create(mfile* mf, std::string device, std::string dbName);
+                             bool forceCreate = false,
+                             Device_Type deviceType = Device_Type::HCA); // clients can force create skiping any support
+                                                                         // check, and move the responsebility to the
+                                                                         // client.
+    static Commander* create(mfile* mf, std::string dbName, Device_Type deviceType = Device_Type::HCA);
     virtual void printLongDesc(FILE*) = 0;
     virtual bool isDefaultSupported() = 0;
     virtual bool isCurrentSupported() = 0;
-    virtual void queryParamViews(std::vector<ParamView>& paramsToQuery, QueryType qt = QueryNext) = 0;
+    virtual void
+      queryParamViews(std::vector<ParamView>& paramsToQuery, bool isWriteOperation, QueryType qt = QueryNext) = 0;
     virtual void queryAll(std::vector<ParamView>& params, vector<string>& failedTLVs, QueryType qt = QueryNext) = 0;
     virtual void getCfg(ParamView& cfgParam, QueryType qt = QueryNext) = 0;
     virtual void setCfg(std::vector<ParamView>&, bool) = 0;
     virtual void clearSemaphore() = 0;
     virtual void invalidateCfgs() = 0;
+    virtual void invalidateCfg(const std::string& configName) = 0;
     virtual const char* loadConfigurationGetStr() = 0;
     virtual void setRawCfg(std::vector<u_int32_t> rawTlvVec) = 0;
     virtual std::vector<u_int32_t> getRawCfg(std::vector<u_int32_t> rawTlvVec) = 0;

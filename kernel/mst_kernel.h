@@ -1,8 +1,34 @@
-/* SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB */
 /*
- * Copyright (c) 2018-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. ALL RIGHTS RESERVED.
+ *
+ * This software is available to you under a choice of one of two
+ * licenses.  You may choose to be licensed under the terms of the GNU
+ * General Public License (GPL) Version 2, available from the file
+ * COPYING in the main directory of this source tree, or the
+ * OpenIB.org BSD license below:
+ *
+ *     Redistribution and use in source and binary forms, with or
+ *     without modification, are permitted provided that the following
+ *     conditions are met:
+ *
+ *      - Redistributions of source code must retain the above
+ *        copyright notice, this list of conditions and the following
+ *        disclaimer.
+ *
+ *      - Redistributions in binary form must reproduce the above
+ *        copyright notice, this list of conditions and the following
+ *        disclaimer in the documentation and/or other materials
+ *        provided with the distribution.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
-
 #ifndef _MST_KERNEL_H_
 #define _MST_KERNEL_H_
 
@@ -38,6 +64,12 @@
 #define MST_CONF_ADDR_REG 88
 #define MST_CONF_DATA_REG 92
 
+#define FUNCTIONAL_VSC 0
+#define RECOVERY_VSC 2
+#define RECOVERY_VSC_OFFSET_IN_CONFIG_SPACE 0x54 // Agreed with FW to keep the VSC offset always in 0x54 in recovery mode(LF/Late LF in CX8,QTM3 and above)
+
+#define ADDRESS_OUT_OF_RANGE 0x3 // syndrome_code value
+
 #define MST_VPD_DEFAULT_TOUT 2000 /* milli seconds */
 
 #define mst_err(format, arg...) pr_err("%s: %s %d: " format, MST_PREFIX, __func__, __LINE__, ##arg)
@@ -47,6 +79,23 @@
     mst_info("Device 0x%x (%x:%x:%x.%x) doesn't support %s capability.\n", dev->pci_dev->device,         \
              pci_domain_nr(dev->pci_dev->bus), dev->pci_dev->bus->number, PCI_SLOT(dev->pci_dev->devfn), \
              PCI_FUNC(dev->pci_dev->devfn), #capability);
+
+#define CHECK_PCI_READ_ERROR(error, address) \
+        if (error) { \
+                printk(KERN_ERR "Failed to read from address: %x\n", address); \
+                goto ReturnOnFinished; \
+        }
+
+#define CHECK_PCI_WRITE_ERROR(error, address, data) \
+        if (error) { \
+                printk(KERN_ERR "Failed to write to address: %x, data: %x\n", address, data); \
+                goto ReturnOnFinished; \
+        }
+
+#define CHECK_ERROR(error) \
+    if (error) { \
+            goto ReturnOnFinished; \
+    }
 
 /****************************************************/
 /* new types */
@@ -84,9 +133,11 @@ struct mst_dev_data
 
     unsigned char connectx_wa_slots; /* wa for pci bug */
                                      /* Vendor specific capability address */
-    int vendor_specific_cap;
-    /* status on VSEC supported spaces*/
+    int functional_vsc_offset;
+    unsigned int recovery_vsc_offset; // For LF and Late LF in CX8, QTM3 and above
+    /* status on FUNCTIONAL VSC supported spaces*/
     int spaces_support_status;
+    int pci_vsec_space_fully_supported; /* For pciconf interface in CX8 and above, where PCI and CORE have different VSC spaces.*/
 
     // Allocated pages for the user space.
     struct dma_page dma_page;

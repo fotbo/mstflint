@@ -34,11 +34,16 @@
 #include "fsctrl_ops.h"
 #include "fw_version.h"
 #include "fs_comps_ops.h"
+#include "mft_utils/mft_utils.h"
+#include "mlxdpa/certcontainerimp.h"
 
 #include <tools_utils.h>
 #include <bit_slice.h>
 
 #include <vector>
+
+#define REG_ID_MPIR 0x9059
+#define REG_ID_MRSV 0x9164
 
 bool FsCtrlOperations::unsupportedOperation()
 {
@@ -73,6 +78,10 @@ u_int8_t FsCtrlOperations::FwType()
     else if (fwFormat == FS_FS4_GEN)
     {
         return FIT_FS4;
+    }
+    else if (fwFormat == FS_FS5_GEN)
+    {
+        return FIT_FS5;
     }
     return FIT_FSCTRL;
 }
@@ -143,15 +152,15 @@ static void extractFwVersion(u_int16_t* fwVerArr, const char* fwVersion)
     delete[] str;
 }
 
-static void extractFwBuildTime(u_int16_t* fwRelDate, u_int32_t buildTime)
+static void extractFwBuildTime(u_int16_t* fwRelDate, reg_access_hca_date_time_layout_ext buildTime)
 {
     if (!fwRelDate)
     {
         return;
     }
-    fwRelDate[0] = EXTRACT(buildTime, 0, 8);
-    fwRelDate[1] = EXTRACT(buildTime, 8, 8);
-    fwRelDate[2] = EXTRACT(buildTime, 16, 16);
+    fwRelDate[0] = buildTime.day;
+    fwRelDate[1] = buildTime.month;
+    fwRelDate[2] = buildTime.year;
 }
 
 bool FsCtrlOperations::FsIntQuery()
@@ -232,6 +241,9 @@ bool FsCtrlOperations::FsIntQuery()
     _fsCtrlImgInfo.sec_boot = fwQuery.sec_boot;
     _fsCtrlImgInfo.life_cycle = fwQuery.life_cycle;
     _fsCtrlImgInfo.encryption = fwQuery.encryption;
+    _fsCtrlImgInfo.ini_file_version = fwQuery.ini_file_version;
+    _fsCtrlImgInfo.geo_address = fwQuery.geo_address;
+    _fsCtrlImgInfo.geo_address_valid = fwQuery.geo_address_valid;
     std::vector<FwComponent> compsMap;
     if (!_fwCompsAccess->getFwComponents(compsMap, false))
     {
@@ -286,7 +298,8 @@ bool FsCtrlOperations::FsIntQuery()
     }
     DPRINTF(("mfsv_reg_supported = %d\n", mfsv_reg_supported));
 
-    if (_fsCtrlImgInfo.sec_boot == 1 && _fsCtrlImgInfo.life_cycle == GA_SECURED && mfsv_reg_supported == 1)
+    if (_fsCtrlImgInfo.sec_boot == 1 && CRSpaceRegisters::IsLifeCycleSecured(_fsCtrlImgInfo.life_cycle) &&
+        mfsv_reg_supported == 1)
     {
         _fsCtrlImgInfo.device_security_version_access_method = MFSV;
     }
@@ -305,26 +318,6 @@ bool FsCtrlOperations::FsIntQuery()
         {
             //// reg_access_hca_mfsv_reg_print(&mfsv_reg, stdout, 4);
             memcpy(&(_fsCtrlImgInfo.device_security_version_mfsv), &mfsv_reg, sizeof(reg_access_hca_mfsv_reg_ext));
-        }
-    }
-
-    //* Read global image status
-    if (_fsCtrlImgInfo.sec_boot == true)
-    {
-        try
-        {
-            CRSpaceRegisters cr_space_reg(mf, _fwImgInfo.ext_info.chip_type);
-            _fsCtrlImgInfo.global_image_status = cr_space_reg.getGlobalImageStatus();
-        }
-        catch (logic_error e)
-        {
-            printf("%s\n", e.what());
-            return false;
-        }
-        catch (exception e)
-        {
-            printf("%s\n", e.what());
-            return false;
         }
     }
 
@@ -352,6 +345,53 @@ bool FsCtrlOperations::FsIntQuery()
         memcpy(_fwImgInfo.ext_info.vsd, fwQuery.deviceVsd, VSD_LEN);
     }
     (strncpy(_fsCtrlImgInfo.image_vsd, fwQuery.imageVsd, VSD_LEN));
+
+    bool mpir_reg_supported = false;
+    rc = isRegisterValidAccordingToMcamReg(mf, REG_ID_MPIR, &mpir_reg_supported);
+    if (rc != ME_OK)
+    {
+        return errmsg("error while reading MCAM reg. reported error code: %d", rc);
+    }
+
+    bool mrsv_reg_supported = false;
+    if (mpir_reg_supported)
+    {
+        struct reg_access_hca_mpir_ext mpir;
+        memset(&mpir, 0, sizeof(mpir));
+        rc = reg_access_mpir(mf, REG_ACCESS_METHOD_GET, &mpir);
+        if (rc == ME_OK)
+        {
+            _fsCtrlImgInfo.socket_direct = mpir.sdm;
+        } // ignoring case where rc != ME_OK since for ARM side of BF-3 we have to dynamically check what are the
+          // indexes of MPIR and not use zeroes as we did - which means read of MPIR will fail
+
+        if (_fsCtrlImgInfo.socket_direct)
+        {
+            rc = isRegisterValidAccordingToMcamReg(mf, REG_ID_MRSV, &mrsv_reg_supported);
+            if (rc != ME_OK)
+            {
+                return errmsg("error while reading MCAM reg. reported error code: %d", rc);
+            }
+        }
+    }
+
+    if (_fsCtrlImgInfo.socket_direct && (mrsv_reg_supported))
+    {
+        struct reg_access_hca_MRSV_ext mrsv;
+        memset(&mrsv, 0, sizeof(mrsv));
+        rc = reg_access_mrsv(mf, REG_ACCESS_METHOD_GET, &mrsv);
+        // MRSV reg is only supported for BF-3 so this is best effort that will only work on a BF-3 device
+        if (rc != ME_OK)
+        {
+            return errmsg("error while reading MRSV reg. reported error code: %d", rc);
+        }
+        if (mrsv.v) // mrsv.v -> MRSV reg is valid
+        {
+            _fsCtrlImgInfo.aux_card_connected = mrsv.data.MRSV_CX_7_Value_ext.two_p_core_active;
+            _fsCtrlImgInfo.is_aux_card_connected_valid = true;
+        }
+    }
+
     return true;
 }
 
@@ -435,9 +475,33 @@ bool FsCtrlOperations::FwQuery(fw_info_t* fwInfo,
     (void)verbose;
     memcpy(&(fwInfo->fw_info), &(_fwImgInfo.ext_info), sizeof(fw_info_com_t));
     memcpy(&(fwInfo->fs3_info), &(_fsCtrlImgInfo), sizeof(fs3_info_t));
-    fwInfo->fs3_info.fs3_uids_info.valid_field = 1;
+    fwInfo->fs3_info.fs3_uids_info.guid_format = IMAGE_LAYOUT_UIDS;
     fwInfo->fw_type = FwType();
 
+    if (isMultiAsicSystemComponent())
+    {
+        dm_dev_id_t dm_device_id = DeviceUnknown;
+        u_int32_t localPort = 0;
+        if (dm_get_device_id_offline(_hwDevId, fwInfo->fw_info.dev_rev, &dm_device_id) == ME_OK)
+        {
+            if (dm_dev_is_switch(dm_device_id))
+            { // local port 0 for switches is virtual, need to use any other port number
+                localPort = 1;
+            }
+        }
+
+        fwInfo->fs3_info.fs3_uids_info.guid_format = MULTI_ASIC_GUIDS;
+        if (!_fwCompsAccess->queryPGUID(fwInfo, localPort, 0, 0)) // this updates fwInfo, which contains the info
+                                                                     // flint query displays.
+        {
+            fwInfo->fs3_info.fs3_uids_info.guid_format = IMAGE_LAYOUT_UIDS;
+            return true;
+        }
+    }
+    else
+    {
+        fwInfo->fs3_info.geo_address_valid = false;
+    }
     return true;
 }
 
@@ -463,18 +527,16 @@ bool FsCtrlOperations::FwVerifyAdv(ExtVerifyParams& verifyParams)
     }
     else
     {
-        FwOperations* imageOps = NULL;
-        if (!_createImageOps(&imageOps))
+        unique_ptr<FwOperations> imageOps = NULL;
+        if (!_createImageOps(imageOps))
         {
             return errmsg("%s", err());
         }
         if (!imageOps->FwVerify(verifyParams.verifyCallBackFunc, verifyParams.isStripedImage, verifyParams.showItoc,
                                 true))
         {
-            delete imageOps;
             return errmsg(imageOps->getErrorCode(), "%s", imageOps->err());
         }
-        delete imageOps;
     }
     return true;
 }
@@ -487,44 +549,22 @@ bool FsCtrlOperations::FwReadData(void* image, u_int32_t* image_size, bool verbo
     return errmsg("Read image is not supported");
 }
 
-bool FsCtrlOperations::ReadBootImage(void* image, u_int32_t* image_size, ProgressCallBackAdvSt* stProgressFunc)
+bool FsCtrlOperations::ReadMccComponent(vector<u_int8_t>& componentRawData,
+                                        FwComponent::comps_ids_t component,
+                                        ProgressCallBackAdvSt* stProgressFunc)
 {
-    if (image)
+    FwComponent comp;
+    if (!_fwCompsAccess->readComponent(component, comp, true, stProgressFunc))
     {
-        FwComponent bootImgComp;
-        if (!_fwCompsAccess->readComponent(FwComponent::COMPID_BOOT_IMG, bootImgComp, true,
-                                           (ProgressCallBackAdvSt*)stProgressFunc))
+        if (!_fwCompsAccess->readComponent(component, comp, false, stProgressFunc))
         {
-            if (!_fwCompsAccess->readComponent(FwComponent::COMPID_BOOT_IMG, bootImgComp, false,
-                                               (ProgressCallBackAdvSt*)stProgressFunc))
-            {
-                return errmsg(FwCompsErrToFwOpsErr(_fwCompsAccess->getLastError()),
-                              "Failed to read boot image, %s - RC[%d]", _fwCompsAccess->getLastErrMsg(),
-                              (int)_fwCompsAccess->getLastError());
-            }
+            return errmsg(FwCompsErrToFwOpsErr(_fwCompsAccess->getLastError()), "Failed to read component, %s - RC[%d]",
+                          _fwCompsAccess->getLastErrMsg(), (int)_fwCompsAccess->getLastError());
         }
-        *image_size = bootImgComp.getSize();
-        memcpy(image, bootImgComp.getData().data(), *image_size);
-        return true;
     }
-    else
-    {
-        std::vector<FwComponent> compsMap;
-        if (!_fwCompsAccess->getFwComponents(compsMap, false))
-        {
-            return errmsg(FwCompsErrToFwOpsErr(_fwCompsAccess->getLastError()),
-                          "Failed to get the FW Components MAP, err[%d]", _fwCompsAccess->getLastError());
-        }
-        for (std::vector<FwComponent>::iterator it = compsMap.begin(); it != compsMap.end(); it++)
-        {
-            if (it->getType() == FwComponent::COMPID_BOOT_IMG)
-            {
-                *image_size = it->getSize();
-                return true;
-            }
-        }
-        return errmsg("Failed to get the Boot image");
-    }
+    componentRawData.resize(comp.getData().size());
+    copy(comp.getData().begin(), comp.getData().end(), componentRawData.begin());
+    return true;
 }
 
 bool FsCtrlOperations::FwReadRom(std::vector<u_int8_t>& romSect)
@@ -614,27 +654,21 @@ bool FsCtrlOperations::VerifyAllowedParams(ExtBurnParams& burnParams, bool isSec
     return true;
 }
 
-bool FsCtrlOperations::_createImageOps(FwOperations** imageOps)
+bool FsCtrlOperations::_createImageOps(unique_ptr<FwOperations>& imageOps)
 {
-    u_int32_t imageSize = 0;
-    if (!ReadBootImage(NULL, &imageSize))
+    vector<u_int8_t> imageData;
+    if (!ReadMccComponent(imageData, FwComponent::COMPID_BOOT_IMG))
     {
         return errmsg("Failed to get boot image size");
-    }
-    std::vector<u_int8_t> imageData;
-    imageData.resize(imageSize);
-    if (!ReadBootImage((void*)imageData.data(), &imageSize))
-    {
-        return errmsg("Failed to read boot image");
     }
     fw_ops_params_t imageParams;
     memset(&imageParams, 0, sizeof(imageParams));
     imageParams.buffHndl = (u_int32_t*)imageData.data();
-    imageParams.buffSize = imageSize;
+    imageParams.buffSize = imageData.size();
     imageParams.hndlType = FHT_FW_BUFF;
     imageParams.ignoreCrcCheck = _fwParams.ignoreCrcCheck;
-    *imageOps = FwOperations::FwOperationsCreate(imageParams);
-    if (!(*imageOps))
+    imageOps = unique_ptr<FwOperations>(FwOperations::FwOperationsCreate(imageParams));
+    if (!(imageOps))
     {
         return errmsg("Failed to create image ops");
     }
@@ -701,17 +735,6 @@ bool FsCtrlOperations::GetHashesTableAddr(u_int32_t& addr)
     return true;
 }
 
-bool FsCtrlOperations::GetITOCAddr(u_int32_t& addr)
-{
-    struct image_layout_hw_pointers_carmel hw_pointers;
-    if (!GetHWPointers(hw_pointers))
-    {
-        return false;
-    }
-    addr = hw_pointers.toc_ptr.ptr;
-    return true;
-}
-
 bool FsCtrlOperations::CheckITOCSignature(u_int8_t* signature)
 {
     const u_int32_t expected_sig[] = {0x49544f43, 0x04081516, 0x2342cafa, 0xbacafe00};
@@ -761,6 +784,11 @@ bool FsCtrlOperations::FwBurnAdvanced(FwOperations* imageOps,
             return errmsg("%s", compsOps->err());
         }
 
+        _fwCompsAccess->SetActivationStep(false);
+    }
+    else if (componentId == FwComponent::comps_ids_t::DIGITAL_CACERT ||
+             componentId == FwComponent::comps_ids_t::DIGITAL_CACERT_REMOVAL)
+    {
         _fwCompsAccess->SetActivationStep(false);
     }
 
@@ -834,6 +862,15 @@ bool FsCtrlOperations::FwBurnAdvanced(FwOperations* imageOps, ExtBurnParams& bur
 bool FsCtrlOperations::burnEncryptedImage(FwOperations* imageOps, ExtBurnParams& burnParams)
 {
     return FwBurnAdvanced(imageOps, burnParams);
+}
+
+bool FsCtrlOperations::isMultiAsicSystemComponent()
+{
+    if (_hwDevId == QUANTUM3_HW_ID || _hwDevId == CX8_HW_ID ||  _hwDevId == CX9_HW_ID)
+    {
+        return true;
+    }
+    return false;
 }
 
 bool FsCtrlOperations::_Burn(std::vector<u_int8_t> imageOps4MData,

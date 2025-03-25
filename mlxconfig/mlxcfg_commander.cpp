@@ -39,20 +39,18 @@
 
 #include <set>
 #include <mtcr.h>
-#include "mlxcfg_4th_gen_commander.h"
 #include "mlxcfg_generic_commander.h"
-#include "mlxcfg_param_lib.h"
 #include "mlxcfg_utils.h"
 
 using namespace std;
 
-Commander* Commander::create(std::string device, std::string dbName, bool forceCreate)
+Commander* Commander::create(std::string device, std::string dbName, bool forceCreate, Device_Type deviceType)
 {
     mfile* mf;
     int rc;
     u_int32_t type = 0;
 
-    mf = mopen(device.c_str());
+    mf = mopen_adv(device.c_str(), (MType)(MST_DEFAULT | MST_CABLE));
     if (mf == NULL)
     {
         throw MlxcfgException("Failed to open the device");
@@ -64,7 +62,7 @@ Commander* Commander::create(std::string device, std::string dbName, bool forceC
     }
     if (!forceCreate)
     {
-        if (type & (MST_USB | MST_USB_DIMAX))
+        if (type & (MST_USB_DIMAX))
         {
             throw MlxcfgException("MTUSB device is not supported.");
         }
@@ -73,7 +71,7 @@ Commander* Commander::create(std::string device, std::string dbName, bool forceC
     Commander* cmdr = NULL;
     try
     {
-        cmdr = create(mf, device, dbName);
+        cmdr = create(mf, dbName, deviceType);
     }
     catch (MlxcfgException& exp)
     {
@@ -84,10 +82,10 @@ Commander* Commander::create(std::string device, std::string dbName, bool forceC
     return cmdr;
 }
 
-Commander* Commander::create(mfile* mf, std::string device, std::string dbName)
+Commander* Commander::create(mfile* mf, std::string dbName, Device_Type deviceType)
 {
     dm_dev_id_t deviceId = DeviceUnknown;
-    u_int32_t hwDevId, hwRevId;
+    u_int32_t hwDevId = 0, hwRevId = 0;
     Commander* commander = NULL;
     if (dm_get_device_id(mf, &deviceId, &hwDevId, &hwRevId))
     {
@@ -99,17 +97,13 @@ Commander* Commander::create(mfile* mf, std::string device, std::string dbName)
         throw MlxcfgException("Device in Livefish mode is not supported");
     }
 
-    if (dm_is_new_gen_switch(deviceId) || dm_is_5th_gen_hca(deviceId))
+    if (dm_dev_is_switch(deviceId)  || dm_is_5th_gen_hca(deviceId) || dm_dev_is_retimer(deviceId))
     {
         if (dbName.empty())
         { // take internal db file
             dbName = getDefaultDBName(dm_dev_is_switch(deviceId));
         }
-        commander = new GenericCommander(mf, dbName);
-    }
-    else if (dm_is_4th_gen(deviceId))
-    {
-        commander = new FourthGenCommander(mf, device);
+        commander = new GenericCommander(mf, dbName, deviceType);
     }
     else
     {

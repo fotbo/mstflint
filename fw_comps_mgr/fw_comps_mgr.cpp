@@ -1,6 +1,6 @@
 /*
  * Copyright (C) Jan 2013 Mellanox Technologies Ltd. All rights reserved.
- * Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -40,8 +40,10 @@
 #include "fw_comps_mgr.h"
 #include "fw_comps_mgr_abstract_access.h"
 #include "fw_comps_mgr_dma_access.h"
-#include "bit_slice.h"
+#include "common/bit_slice.h"
+#include "common/tools_time.h"
 #include <signal.h>
+#include <iostream>
 
 #include "mflash/mflash_access_layer.h"
 #include "dev_mgt/tools_dev_types.h"
@@ -794,6 +796,31 @@ bool FwCompsMgr::runMCQI(u_int32_t componentIndex,
     return ret;
 }
 
+bool FwCompsMgr::runPGUID(reg_access_hca_pguid_reg_ext* guidsInfo,
+                          u_int32_t local_port,
+                          u_int8_t pnat,
+                          u_int32_t lp_msb)
+{
+    bool ret = true;
+
+    mft_signal_set_handling(1);
+    guidsInfo->local_port = local_port;
+    guidsInfo->pnat = pnat;
+    guidsInfo->lp_msb = lp_msb;
+
+    DPRINTF(("-D- PGUID: local_port %u pnat %u lp_msb %u""\n", local_port, pnat, lp_msb));
+    reg_access_status_t rc = reg_access_pguid(_mf, REG_ACCESS_METHOD_GET, guidsInfo);
+    deal_with_signal();
+    if (rc)
+    {
+        _lastError = regErrTrans(rc);
+        setLastRegisterAccessStatus(rc);
+        ret = false;
+    }
+
+    return ret;
+}
+
 bool FwCompsMgr::getDeviceHWInfo(FwCompsMgr::MQISDeviceDescriptionT op, vector < u_int8_t >& infoString)
 {
     mqisReg mqisRegister;
@@ -848,6 +875,35 @@ bool FwCompsMgr::getDeviceHWInfo(FwCompsMgr::MQISDeviceDescriptionT op, vector <
             leftSize -= mqisRegister.read_length;
         }
     }
+    return true;
+}
+
+bool FwCompsMgr::queryPGUID(fw_info_t* fwInfo,
+                            u_int32_t local_port,
+                            u_int8_t pnat,
+                            u_int32_t lp_msb)
+{
+    struct reg_access_hca_pguid_reg_ext guidsInfo;
+    memset(&guidsInfo, 0, sizeof(guidsInfo));
+
+    if (!runPGUID(&guidsInfo, local_port, pnat, lp_msb))
+    {
+        DPRINTF(("Error in reading PGUID register.\n"));
+        return false;
+    }
+    // FW writes the GUID info (64 bits) to indexes 2 and 3 of the uint32_t array.
+    // This operation is designed with little-endian systems in mind, where LSB is stored first.
+    // By shifting the third element (high part) to the left by 32 bits and combining it with the fourth element (low
+    // part) using bitwise OR, we ensure the correct assembly of the 64-bit GUID in a little-endian memory layout.
+    fwInfo->fs3_info.fs3_uids_info.multi_asic_guids.sys_guid =
+      (static_cast<uint64_t>(guidsInfo.sys_guid[2]) << 32) | guidsInfo.sys_guid[3];
+    fwInfo->fs3_info.fs3_uids_info.multi_asic_guids.node_guid =
+      (static_cast<uint64_t>(guidsInfo.node_guid[2]) << 32) | guidsInfo.node_guid[3];
+    fwInfo->fs3_info.fs3_uids_info.multi_asic_guids.port_guid =
+      (static_cast<uint64_t>(guidsInfo.port_guid[2]) << 32) | guidsInfo.port_guid[3];
+    fwInfo->fs3_info.fs3_uids_info.multi_asic_guids.allocated_guid =
+      (static_cast<uint64_t>(guidsInfo.allocated_guid[2]) << 32) | guidsInfo.allocated_guid[3];
+
     return true;
 }
 
@@ -938,9 +994,7 @@ void FwCompsMgr::initialize(mfile* mf)
     _componentIndex = 0;
     _lastRegAccessStatus = ME_OK;
     _updateHandle = 0;
-    if (getFwSupport()) {
-        GenerateHandle();
-    }
+    _fwSupport = getFwSupport();
     ComponentAccessFactory* factory = ComponentAccessFactory::GetInstance();
 
     _accessObj = factory->createDataAccessObject(this, mf, _isDmaSupported);
@@ -966,6 +1020,8 @@ void FwCompsMgr::SetIndexAndSize(int  deviceIndex,
 
 FwCompsMgr::FwCompsMgr(mfile* mf, DeviceTypeT devType, int deviceIndex)
 {
+    _fwSupport = false;
+    _handleGenerated = false;
     _clearSetEnv = false;
     _openedMfile = false;
     _hwDevId = 0;
@@ -991,6 +1047,8 @@ FwCompsMgr::FwCompsMgr(mfile* mf, DeviceTypeT devType, int deviceIndex)
 FwCompsMgr::FwCompsMgr(const char* devname, DeviceTypeT devType, int deviceIndex)
 {
     _mf = NULL;
+    _fwSupport = false;
+    _handleGenerated = false;
     _openedMfile = false;
     _clearSetEnv = false;
     _accessObj = NULL;
@@ -1098,11 +1156,16 @@ bool FwCompsMgr::forceRelease()
 
 void FwCompsMgr::GenerateHandle()
 {
-    if (!controlFsm(FSM_QUERY, FSMST_NA, 0, FSMST_NA, NULL, REG_ACCESS_TOUT)) {
-        _updateHandle = 0;
-        return;
+    if (!_handleGenerated)
+    {
+        if (!controlFsm(FSM_QUERY, FSMST_NA, 0, FSMST_NA, NULL, REG_ACCESS_TOUT))
+        {
+            _updateHandle = 0;
+            return;
+        }
+        _updateHandle = _lastFsmCtrl.update_handle & 0xffffff;
+        _handleGenerated = true;
     }
-    _updateHandle = _lastFsmCtrl.update_handle & 0xffffff;
 }
 
 const char* CompNames[] = {"NO_COMPONENT 1",          "COMPID_BOOT_IMG",
@@ -1206,6 +1269,7 @@ bool FwCompsMgr::readComponent(FwComponent::comps_ids_t compType,
     u_int32_t compSize = _currCompQuery->comp_cap.component_size;
 
     if (_currCompQuery->comp_cap.rd_en) {
+        GenerateHandle();
         data.resize(compSize);
         if (!controlFsm(FSM_CMD_LOCK_UPDATE_HANDLE, FSMST_LOCKED)) {
             return false;
@@ -1286,6 +1350,7 @@ bool FwCompsMgr::burnComponents(std::vector < FwComponent >& comps, ProgressCall
     if (!RefreshComponentsStatus()) {
         return false;
     }
+    GenerateHandle();
     if (!controlFsm(FSM_CMD_LOCK_UPDATE_HANDLE, FSMST_LOCKED)) {
         DPRINTF(("Cannot lock the handle!\n"));
         if (forceRelease() == false) {
@@ -1407,6 +1472,10 @@ FwComponent::comps_ids_t FwComponent::getCompId(string compId)
     {
         return COMPID_CLOCK_SYNC_EEPROM;
     }
+    else if (compId == "digital_cacert")
+    {
+        return DIGITAL_CACERT;
+    }
 
     return COMPID_UNKNOWN;
 }
@@ -1459,6 +1528,14 @@ const char* FwComponent::getCompIdStr(comps_ids_t compId)
     case COMPID_CLOCK_SYNC_EEPROM:
         return "COMPID_CLOCK_SYNC_EEPROM";
 
+        case DIGITAL_CACERT:
+            return "DIGITAL_CACERT";
+        case DIGITAL_CACERT_CHAIN:
+            return "DIGITAL_CACERT_CHAIN";
+        case DIGITAL_CACERT_REMOVAL:
+            return "DIGITAL_CACERT_REMOVAL";
+        case DIGITAL_CACERT_CHAIN_REMOVAL:
+            return "DIGITAL_CACERT_CHAIN_REMOVAL";
     default:
         return "UNKNOWN_COMPONENT";
     }
@@ -1526,13 +1603,22 @@ u_int32_t FwCompsMgr::getFwSupport()
         _lastError = FWCOMPS_UNSUPPORTED_DEVICE;
         return 0;
     }
-
     _mircCaps = EXTRACT(mcam.mng_access_reg_cap_mask[3 - 3], 2, 1);
-    DPRINTF((
-                "getFwSupport _mircCaps = %d mcqsCap = %d mcqiCap = %d mccCap = %d mcdaCap = %d mqisCap = %d mcddCap = %d mgirCap = %d\n",
-                _mircCaps, mcqsCap, mcqiCap, mccCap, mcdaCap, mqisCap, mcddCap, mgirCap));
+    int mode = 0;
+    struct tools_open_mlock mlock;
+    memset(&mlock, 0, sizeof(mlock));
+    rc = reg_access_secure_host(_mf, REG_ACCESS_METHOD_GET, &mlock);
+    if (rc == ME_OK)
+    {
+        mode = mlock.operation;
+    }
 
-    if (mcqsCap && mcqiCap && mccCap && mcdaCap && mqisCap && mgirCap) {
+    DPRINTF((
+      "getFwSupport _mircCaps = %d mcqsCap = %d mcqiCap = %d mccCap = %d mcdaCap = %d mqisCap = %d mcddCap = %d mgirCap = %d secure_host = %d\n",
+      _mircCaps, mcqsCap, mcqiCap, mccCap, mcdaCap, mqisCap, mcddCap, mgirCap, mode));
+
+    if (mcqsCap && mcqiCap && mccCap && mcdaCap && mqisCap && mgirCap && mode == 0)
+    {
         return 1;
     }
     _lastError = FWCOMPS_UNSUPPORTED_DEVICE;
@@ -1718,18 +1804,29 @@ bool FwCompsMgr::queryFwInfo(fwInfoT* query, bool next_boot_fw_ver)
     query->security_type.signed_fw = mgir.fw_info.signed_fw;
     query->security_type.debug_fw = mgir.fw_info.debug;
     query->security_type.dev_fw = mgir.fw_info.dev;
-    query->life_cycle = (life_cycle_t)mgir.fw_info.life_cycle;
+    query->life_cycle.value = mgir.fw_info.life_cycle;
+    query->life_cycle.value |= (mgir.fw_info.life_cycle_msb << 2);
     query->sec_boot = mgir.fw_info.sec_boot;
     query->encryption = mgir.fw_info.encryption;
     query->signed_fw = _compsQueryMap[FwComponent::COMPID_BOOT_IMG].comp_cap.signed_updates_only;
+    query->ini_file_version = mgir.fw_info.ini_file_version;
+    query->geo_address = mgir.hw_info.ga;
+    query->geo_address_valid = mgir.hw_info.ga_valid;
 
     /* Since in switches MGIR 'dev' field is used to indicate dev-branch instead of the original purpose for dev-secure, */
     /* we now read from a new field called 'dev_sc' to determine if the switch is dev-secure */
     dm_dev_id_t dm_device_id = DeviceUnknown;
 
     if (dm_get_device_id_offline(query->hw_dev_id, query->rev_id, &dm_device_id) == ME_OK) {
-        if (dm_dev_is_switch(dm_device_id)) {
+        if (dm_dev_is_switch(dm_device_id) || dm_dev_is_retimer(dm_device_id))
+        {
             query->security_type.dev_fw = mgir.fw_info.dev_sc;
+        }
+        if (dm_dev_is_fs5(dm_device_id) && query->life_cycle.value == FS5_LC_PRE_PRODUCTION) // Other LC values returned
+                                                                                             // from MGIR are translated
+                                                                                             // to FS4 LC values.
+        {
+            query->life_cycle.version_field = 1;
         }
     } else {
         _lastError = FWCOMPS_UNSUPPORTED_DEVICE;
@@ -1873,6 +1970,12 @@ unsigned char* FwCompsMgr::getLastErrMsg()
 
     case FWCOMPS_MCC_REJECTED_TOKEN_ALREADY_APPLIED:
         return (unsigned char*)"Token already applied";
+
+        case FWCOMPS_MCC_REJECTED_FW_BURN_DRAM_NOT_AVAILABLE:
+            return (unsigned char*)"DRAM not available";
+
+        case FWCOMPS_MCC_REJECTED_FLASH_WP:
+            return (unsigned char*)"Flash is write protected";
 
     case FWCOMPS_UNSUPPORTED_DEVICE:
         return (unsigned char*)"Unsupported device";
@@ -2134,6 +2237,7 @@ bool FwCompsMgr::readBlockFromComponent(FwComponent::comps_ids_t  compId,
         return false;
     }
     if (_currCompQuery->comp_cap.rd_en) {
+        GenerateHandle();
         data.resize(size);
         if (!controlFsm(FSM_CMD_LOCK_UPDATE_HANDLE, FSMST_LOCKED)) {
             return false;
@@ -2296,7 +2400,7 @@ fw_comps_error_t FwCompsMgr::regErrTrans(reg_access_status_t err)
     case ME_REG_ACCESS_UNKNOWN_ERR:
         return FWCOMPS_REG_ACCESS_UNKNOWN_ERR;
 
-    case ME_REG_ACCESS_SIZE_EXCCEEDS_LIMIT:
+    case ME_REG_ACCESS_SIZE_EXCEEDS_LIMIT:
         return FWCOMPS_REG_ACCESS_SIZE_EXCCEEDS_LIMIT;
 
     case ME_REG_ACCESS_CONF_CORRUPT:
@@ -2308,7 +2412,7 @@ fw_comps_error_t FwCompsMgr::regErrTrans(reg_access_status_t err)
     case ME_REG_ACCESS_BAD_CONFIG:
         return FWCOMPS_REG_ACCESS_BAD_CONFIG;
 
-    case ME_REG_ACCESS_ERASE_EXEEDED:
+    case ME_REG_ACCESS_ERASE_EXCEEDED:
         return FWCOMPS_REG_ACCESS_ERASE_EXEEDED;
 
     case ME_REG_ACCESS_INTERNAL_ERROR:
@@ -2397,6 +2501,12 @@ fw_comps_error_t FwCompsMgr::mccErrTrans(u_int8_t err)
 
     case MCC_ERRCODE_REJECTED_TOKEN_ALREADY_APPLIED:
         return FWCOMPS_MCC_REJECTED_TOKEN_ALREADY_APPLIED;
+
+        case MCC_ERRCODE_REJECTED_FW_BURN_DRAM_NOT_AVAILABLE:
+            return FWCOMPS_MCC_REJECTED_FW_BURN_DRAM_NOT_AVAILABLE;
+
+        case MCC_ERRCODE_REJECTED_FLASH_WP:
+            return FWCOMPS_MCC_REJECTED_FLASH_WP;
 
     default:
         return FWCOMPS_GENERAL_ERR;

@@ -80,6 +80,8 @@ void image_layout_component_authentication_configuration_pack(const struct image
 
 	offset = 24;
 	adb2c_push_bits_to_buff(ptr_buff, offset, 8, (u_int32_t)ptr_struct->auth_type);
+	offset = 6;
+	adb2c_push_bits_to_buff(ptr_buff, offset, 1, (u_int32_t)ptr_struct->c_r_token_en);
 	offset = 5;
 	adb2c_push_bits_to_buff(ptr_buff, offset, 1, (u_int32_t)ptr_struct->btc_token_en);
 	offset = 4;
@@ -100,6 +102,8 @@ void image_layout_component_authentication_configuration_unpack(struct image_lay
 
 	offset = 24;
 	ptr_struct->auth_type = (u_int8_t)adb2c_pop_bits_from_buff(ptr_buff, offset, 8);
+	offset = 6;
+	ptr_struct->c_r_token_en = (u_int8_t)adb2c_pop_bits_from_buff(ptr_buff, offset, 1);
 	offset = 5;
 	ptr_struct->btc_token_en = (u_int8_t)adb2c_pop_bits_from_buff(ptr_buff, offset, 1);
 	offset = 4;
@@ -121,6 +125,8 @@ void image_layout_component_authentication_configuration_print(const struct imag
 
 	adb2c_add_indentation(fd, indent_level);
 	fprintf(fd, "auth_type            : " UH_FMT "\n", ptr_struct->auth_type);
+	adb2c_add_indentation(fd, indent_level);
+	fprintf(fd, "c_r_token_en         : " UH_FMT "\n", ptr_struct->c_r_token_en);
 	adb2c_add_indentation(fd, indent_level);
 	fprintf(fd, "btc_token_en         : " UH_FMT "\n", ptr_struct->btc_token_en);
 	adb2c_add_indentation(fd, indent_level);
@@ -1688,6 +1694,8 @@ void image_layout_image_info_pack(const struct image_layout_image_info *ptr_stru
 	}
 	offset = 432;
 	adb2c_push_bits_to_buff(ptr_buff, offset, 16, (u_int32_t)ptr_struct->vsd_vendor_id);
+	offset = 424;
+	adb2c_push_bits_to_buff(ptr_buff, offset, 8, (u_int32_t)ptr_struct->psc_sku);
 	for (i = 0; i < 208; ++i) {
 		offset = adb2c_calc_array_field_address(472, 8, i, 8192, 1);
 		adb2c_push_bits_to_buff(ptr_buff, offset, 8, (u_int32_t)ptr_struct->vsd[i]);
@@ -1696,6 +1704,8 @@ void image_layout_image_info_pack(const struct image_layout_image_info *ptr_stru
 	image_layout_image_size_pack(&(ptr_struct->image_size), ptr_buff + offset / 8);
 	offset = 2200;
 	adb2c_push_bits_to_buff(ptr_buff, offset, 8, (u_int32_t)ptr_struct->synced_reset_downtime);
+	offset = 2192;
+	adb2c_push_bits_to_buff(ptr_buff, offset, 8, (u_int32_t)ptr_struct->dtoc_offset);
 	offset = 2176;
 	adb2c_push_bits_to_buff(ptr_buff, offset, 16, (u_int32_t)ptr_struct->toc_copy_ofst);
 	for (i = 0; i < 4; ++i) {
@@ -1784,6 +1794,8 @@ void image_layout_image_info_unpack(struct image_layout_image_info *ptr_struct, 
 		ptr_struct->psid[16] = '\0';
 	offset = 432;
 	ptr_struct->vsd_vendor_id = (u_int16_t)adb2c_pop_bits_from_buff(ptr_buff, offset, 16);
+	offset = 424;
+	ptr_struct->psc_sku = (u_int8_t)adb2c_pop_bits_from_buff(ptr_buff, offset, 8);
 	for (i = 0; i < 208; ++i) {
 		offset = adb2c_calc_array_field_address(472, 8, i, 8192, 1);
 		ptr_struct->vsd[i] = (char)adb2c_pop_bits_from_buff(ptr_buff, offset, 8);
@@ -1793,6 +1805,8 @@ void image_layout_image_info_unpack(struct image_layout_image_info *ptr_struct, 
 	image_layout_image_size_unpack(&(ptr_struct->image_size), ptr_buff + offset / 8);
 	offset = 2200;
 	ptr_struct->synced_reset_downtime = (u_int8_t)adb2c_pop_bits_from_buff(ptr_buff, offset, 8);
+	offset = 2192;
+	ptr_struct->dtoc_offset = (u_int8_t)adb2c_pop_bits_from_buff(ptr_buff, offset, 8);
 	offset = 2176;
 	ptr_struct->toc_copy_ofst = (u_int16_t)adb2c_pop_bits_from_buff(ptr_buff, offset, 16);
 	for (i = 0; i < 4; ++i) {
@@ -1885,12 +1899,16 @@ void image_layout_image_info_print(const struct image_layout_image_info *ptr_str
 		fprintf(fd, "psid                 : \"%s\"\n", ptr_struct->psid);
 	adb2c_add_indentation(fd, indent_level);
 	fprintf(fd, "vsd_vendor_id        : " UH_FMT "\n", ptr_struct->vsd_vendor_id);
+	adb2c_add_indentation(fd, indent_level);
+	fprintf(fd, "psc_sku              : " UH_FMT "\n", ptr_struct->psc_sku);
 		fprintf(fd, "vsd                  : \"%s\"\n", ptr_struct->vsd);
 	adb2c_add_indentation(fd, indent_level);
 	fprintf(fd, "image_size:\n");
 	image_layout_image_size_print(&(ptr_struct->image_size), fd, indent_level + 1);
 	adb2c_add_indentation(fd, indent_level);
 	fprintf(fd, "synced_reset_downtime : " UH_FMT "\n", ptr_struct->synced_reset_downtime);
+	adb2c_add_indentation(fd, indent_level);
+	fprintf(fd, "dtoc_offset         : " UH_FMT "\n", ptr_struct->dtoc_offset);
 	adb2c_add_indentation(fd, indent_level);
 	fprintf(fd, "toc_copy_ofst        : " UH_FMT "\n", ptr_struct->toc_copy_ofst);
 	for (i = 0; i < 4; ++i) {

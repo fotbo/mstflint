@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <errno.h>
 #include <utility>
+#include <fstream>
 
 #include <common/tools_version.h>
 
@@ -88,12 +89,14 @@ void MlxCfg::printHelp()
     printFlagLine("h", "help", "", "Display help message.");
     printFlagLine("v", "version", "", "Display version info.");
     printFlagLine("e", "enable_verbosity", "", "Show default and current configurations.");
+    printFlagLine("j", "json_format", "file",
+                  "Save the query output to file in JSON format, only usable with Query command");
     printFlagLine("y", "yes", "", "Answer yes in prompt.");
     printFlagLine("a", "all_attrs", "", "Show all attributes in the XML template");
     printFlagLine("p", "private_key", "PKEY", "pem file for private key");
     printFlagLine("u", "key_uuid", "UUID", "keypair uuid");
-    printFlagLine("eng", "openssl_engine", "ENGINE NAME", "OpenSSL engine name");
-    printFlagLine("k", "openssl_key_id", "IDENTIFIER", "OpenSSL key identifier");
+    printFlagLine("eng", "openssl_engine", "ENGINE NAME", "deprecated");
+    printFlagLine("k", "openssl_key_id", "IDENTIFIER", "deprecated");
     printFlagLine("t", "device_type", "switch/hca", "Specify the device type");
 
     // print commands
@@ -102,7 +105,8 @@ void MlxCfg::printHelp()
     printf(IDENT2 "%-24s : %s\n", "clear_semaphore", "clear the tool semaphore.");
     printf(IDENT2 "%-24s : %s\n", "i|show_confs", "display information about all configurations.");
     printf(IDENT2 "%-24s : %s\n", "q|query", "query supported configurations.");
-    printf(IDENT2 "%-24s : %s\n", "r|reset", "reset all configurations to their default value.");
+    printf(IDENT2 "%-24s : %s\n", "r|reset",
+           "reset all configurations to their default value. Optionally, resets specific TLV if given.");
     printf(IDENT2 "%-24s : %s\n", "s|set", "set configurations to a specific device.");
     printf(IDENT2 "%-24s : %s\n", "set_raw", "set raw configuration file(5th Generation and above).");
     printf(IDENT2 "%-24s : %s\n", "get_raw", "get raw configuration (5th Generation and above).");
@@ -136,20 +140,16 @@ void MlxCfg::printHelp()
     printf("\n");
     printf(IDENT "Examples:\n");
     printf(IDENT2 "%-35s: %s\n", "To query configurations", MLXCFG_NAME " -d " MST_DEV_EXAMPLE " query");
+    printf(IDENT2 "%-35s: %s\n", "To query in json format",
+           MLXCFG_NAME " -d " MST_DEV_EXAMPLE " -j /tmp/query.json query");
+    printf(IDENT2 "%-35s: %s\n", "To query specific parameter", MLXCFG_NAME " -d " MST_DEV_EXAMPLE " q NUM_OF_VFS");
     printf(IDENT2 "%-35s: %s\n", "To set configuration",
            MLXCFG_NAME " -d " MST_DEV_EXAMPLE " set SRIOV_EN=1 NUM_OF_VFS=16 WOL_MAGIC_EN_P1=1");
     printf(IDENT2 "%-35s: %s\n", "To set raw configuration",
            MLXCFG_NAME " -d " MST_DEV_EXAMPLE2 " -f conf_file set_raw");
     printf(IDENT2 "%-35s: %s\n", "To reset configuration", MLXCFG_NAME " -d " MST_DEV_EXAMPLE " reset");
-    printf("\n");
-    printf(IDENT "Supported devices:\n");
-    printf(IDENT2 "4th Generation devices: ConnectX3, ConnectX3-Pro (FW 2.31.5000 and above).\n");
-    printf(IDENT2 "5th Generation devices: ConnectIB, ConnectX4, ConnectX4-LX, ConnectX5, connectX5-Ex.\n");
-    printf(IDENT2 "6th Generation devices: BlueField, BlueField2, ConnectX6, ConnectX6-DX, ConnectX6-LX\n");
-    printf(IDENT2 "Switches: Switch-IB, Switch-IB2,Spectrum, Spectrum2, Spectrum3, Quantum, Quantum2\n");
-
-    printf("\n");
-    printf(IDENT "Note: query device to view supported configurations by Firmware.\n");
+    printf(IDENT2 "%-35s: %s\n", "To reset specific configuration",
+           MLXCFG_NAME " -d " MST_DEV_EXAMPLE " reset NV_GLOBAL_PCI_CONF_4");
     printf("\n");
 }
 
@@ -177,20 +177,21 @@ bool MlxCfg::tagExsists(string tag)
 
 inline const char* cmdNVInputFileTag(mlxCfgCmd cmd, const char* def)
 {
-    return (cmd == Mc_XML2Raw || cmd == Mc_XML2Bin || cmd == Mc_CreateConf) ?
-             "XML" :
-             (cmd == Mc_Raw2XML) ? "Raw" :
-                                   (cmd == Mc_GenXMLTemplate) ? "TLVs" : (cmd == Mc_Apply) ? "Configuration" : def;
+    return (cmd == Mc_XML2Raw || cmd == Mc_XML2Bin || cmd == Mc_CreateConf) ? "XML" :
+           (cmd == Mc_Raw2XML)                                              ? "Raw" :
+           (cmd == Mc_GenXMLTemplate)                                       ? "TLVs" :
+           (cmd == Mc_Apply)                                                ? "Configuration" :
+                                                                              def;
 }
 
 inline const char* cmdNVOutputFileTag(mlxCfgCmd cmd, const char* def)
 {
-    return (cmd == Mc_XML2Raw) ?
-             "Raw" :
-             (cmd == Mc_Raw2XML) ?
-             "XML" :
-             (cmd == Mc_GenXMLTemplate) ? "XML" :
-                                          (cmd == Mc_XML2Bin) ? "Bin" : (cmd == Mc_CreateConf) ? "Configuration" : def;
+    return (cmd == Mc_XML2Raw)        ? "Raw" :
+           (cmd == Mc_Raw2XML)        ? "XML" :
+           (cmd == Mc_GenXMLTemplate) ? "XML" :
+           (cmd == Mc_XML2Bin)        ? "Bin" :
+           (cmd == Mc_CreateConf)     ? "Configuration" :
+                                        def;
 }
 
 mlxCfgStatus MlxCfg::extractNVInputFile(int argc, char* argv[])
@@ -388,23 +389,6 @@ mlxCfgStatus MlxCfg::extractSetCfgArgs(int argc, char* argv[])
     return MLX_CFG_OK;
 }
 
-Device_Type MlxCfg::getDeviceTypeFromString(string inStr)
-{
-    mft_utils::to_lowercase(inStr);
-    if (inStr == "switch")
-    {
-        return Device_Type::Switch;
-    }
-    else if (inStr == "hca")
-    {
-        return Device_Type::HCA;
-    }
-    else
-    {
-        return Device_Type::UNSUPPORTED_DEVICE;
-    }
-}
-
 mlxCfgStatus MlxCfg::getNumberFromString(const char* str, u_int32_t& num)
 {
     char* end = NULL;
@@ -418,6 +402,7 @@ mlxCfgStatus MlxCfg::getNumberFromString(const char* str, u_int32_t& num)
 
 mlxCfgStatus MlxCfg::parseArgs(int argc, char* argv[])
 {
+    mlxCfgStatus status = MLX_CFG_OK;
     int i = 1;
     for (; i < argc; i++)
     {
@@ -461,6 +446,15 @@ mlxCfgStatus MlxCfg::parseArgs(int argc, char* argv[])
             }
             _mlxParams.dbName = argv[i];
         }
+        else if (arg == "-j" || arg == "--json_format")
+        {
+            if (++i == argc)
+            {
+                return err(true, "missing .json output file");
+            }
+            _mlxParams.isJsonOutputRequested = true;
+            _mlxParams.NVOutputFile = argv[i];
+        }
         else if (arg == "-y" || arg == "--yes")
         {
             _mlxParams.yes = true;
@@ -499,19 +493,11 @@ mlxCfgStatus MlxCfg::parseArgs(int argc, char* argv[])
         }
         else if (arg == "-eng" || arg == "--openssl_engine")
         {
-            if (++i == argc)
-            {
-                return err(true, "missing OpenSSL engine");
-            }
-            _mlxParams.opensslEngine = argv[i];
+            return err(true, "The '--openssl_engine' and '-eng' flags have been deprecated.\n");
         }
         else if (arg == "-k" || arg == "--openssl_key_id")
         {
-            if (++i == argc)
-            {
-                return err(true, "missing OpenSSL key identifier");
-            }
-            _mlxParams.opensslKeyId = argv[i];
+            return err(true, "The '--openssl_key_id' and '-k' flags have been deprecated.\n");
         }
         // hidden flag --force used to ignore parameter checks
         else if (arg == "--force")
@@ -563,7 +549,7 @@ mlxCfgStatus MlxCfg::parseArgs(int argc, char* argv[])
             _mlxParams.cmd = Mc_GenXMLTemplate;
             break;
         }
-        else if (arg == "raw2xml" || arg == "r")
+        else if (arg == "raw2xml")
         {
             _mlxParams.cmd = Mc_Raw2XML;
             break;
@@ -608,13 +594,15 @@ mlxCfgStatus MlxCfg::parseArgs(int argc, char* argv[])
     {
         return err(true, "missing configuration arguments. For more information please run " MLXCFG_NAME " -h|--help.");
     }
-    if (i != argc && (_mlxParams.cmd == Mc_Reset))
+
+    if ((_mlxParams.cmd != Mc_Query) && _mlxParams.isJsonOutputRequested)
     {
-        return err(true, "%s command expects no argument but %d argument received", "reset", argc - i);
+        return err(true, "Json format is only supported for query command.");
     }
 
     if ((_mlxParams.cmd == Mc_Set || _mlxParams.cmd == Mc_Clr_Sem || _mlxParams.cmd == Mc_Set_Raw ||
-         _mlxParams.cmd == Mc_Backup || _mlxParams.cmd == Mc_ShowConfs || _mlxParams.cmd == Mc_Apply) &&
+         _mlxParams.cmd == Mc_Get_Raw || _mlxParams.cmd == Mc_Backup || _mlxParams.cmd == Mc_ShowConfs || 
+		 _mlxParams.cmd == Mc_Apply) &&
         _mlxParams.device.length() == 0)
     {
         return err(true, "%s command expects device to be specified.",
@@ -661,15 +649,7 @@ mlxCfgStatus MlxCfg::parseArgs(int argc, char* argv[])
 
     if (_mlxParams.cmd == Mc_CreateConf)
     {
-        if (!_mlxParams.privPemFile.empty() && (!_mlxParams.opensslEngine.empty() || !_mlxParams.opensslKeyId.empty()))
-        {
-            return err(true,
-                       "Please provide either private pem file or OpenSSL engine and key identifier "
-                       "but not both of them");
-        }
-
-        if (!_mlxParams.keyPairUUID.empty() ^ (!_mlxParams.privPemFile.empty() ||
-                                               (!_mlxParams.opensslEngine.empty() && !_mlxParams.opensslKeyId.empty())))
+        if (!_mlxParams.keyPairUUID.empty() ^ (!_mlxParams.privPemFile.empty()))
         {
             return err(true,
                        "if you want to sign the configuration file you have to "
@@ -691,7 +671,7 @@ mlxCfgStatus MlxCfg::parseArgs(int argc, char* argv[])
 
     try
     {
-        if (_mlxParams.cmd == Mc_Query)
+        if (_mlxParams.cmd == Mc_Query || _mlxParams.cmd == Mc_Reset)
         {
             return extractQueryCfgArgs(argc - i, &(argv[i]));
         }

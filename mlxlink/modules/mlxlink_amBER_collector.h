@@ -37,7 +37,7 @@
 #include "amber_field.h"
 
 // Un-comment to see access register failures
-//#define VALIDATE_REG_REQUEST
+// #define VALIDATE_REG_REQUEST
 
 using namespace std;
 
@@ -62,6 +62,7 @@ public:
     virtual vector<AmberField> getLinkStatus();
     virtual vector<AmberField> getSerdesHDR();
     virtual vector<AmberField> getSerdesNDR();
+    virtual vector<AmberField> getSerdesXDR();
     virtual vector<AmberField> getModuleStatus();
     virtual vector<AmberField> getPortCounters();
     virtual vector<AmberField> getTroubleshootingInfo();
@@ -72,6 +73,7 @@ public:
     virtual vector<AmberField> getTestModeModuleInfo();
     virtual vector<AmberField> getPhyDebugInfo();
     virtual vector<AmberField> getExtModuleStatus();
+    virtual vector<AmberField> getRecoveryCounters();
 
     void getPpcntBer(u_int32_t portType, vector<AmberField>& fields);
     bool isGBValid();
@@ -126,6 +128,7 @@ private:
     void getTestModeModulePMPT(vector<AmberField>& fields, string moduleSide, ModuleAccess_t mode);
     void getTestModeModulePMPD(vector<AmberField>& fields, string moduleSide);
     u_int32_t getSheetIndex(AMBER_SHEET sheet);
+    void getPemiSnr(vector<AmberField>& fields, bool isGroupSupported);
 
     void collect();
     vector<AmberField> collectSheet(AMBER_SHEET sheet);
@@ -150,24 +153,28 @@ protected:
     u_int32_t getLocalFieldValue(const string& fieldName);
     void sendRegister(const string& regName, maccess_reg_method_t method);
     void sendLocalPrmReg(const string& regName, maccess_reg_method_t method, const char* fields, ...);
+
     string getBitmaskPerLaneStr(u_int32_t bitmask);
     void fillParamsToFields(const string& title, const vector<string>& values, vector<AmberField>& fields);
     void pushModulePerLaneField(vector<AmberField>& fields,
                                 string fieldName,
                                 float valueCorrection = 1.0,
-                                string laneSep = "_");
+                                string laneSep = "_",
+                                float multiplier = 1.0);
     void pushModuleDpPerLane(vector<AmberField>& fields, const string str);
 
     // Helper functions
     virtual string getBerAndErrorTitle(u_int32_t portType);
     virtual void getTestModePrpsInfo(const string& prbsReg, vector<vector<string>>& params);
     string getClRawBer();
+    virtual void getModuleLinkUpInfoPage(vector<AmberField>& fields);
 
     // Callers
 
     bool _isCmisCable;
     bool _isPortIB;
     bool _isPortETH;
+    bool _isPortNVLINK;
     bool _isPortPCIE;
     bool _isMCMSysValid;
     bool _isGBSysValid;

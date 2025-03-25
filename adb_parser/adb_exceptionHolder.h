@@ -45,8 +45,7 @@
 
 using namespace std;
 
-typedef vector<string> StringVector;
-typedef map<string, StringVector> ExceptionsMap;
+typedef map<string, vector<string> > ExceptionsMap;
 
 class ExceptionHolder
 {
@@ -55,6 +54,7 @@ public:
     static void insertNewException(const string exceptionType, string exceptionTxt);
     static ExceptionsMap getAdbExceptionsMap();
     static int getNumberOfExceptions();
+    static string printAdbExceptionMap();
 
 public:
     // VARIABLES

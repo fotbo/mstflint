@@ -1,5 +1,4 @@
-#--
-# Copyright (c) 2004-2010 Mellanox Technologies LTD. All rights reserved.
+# Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. ALL RIGHTS RESERVED.
 #
 # This software is available to you under a choice of one of two
 # licenses.  You may choose to be licensed under the terms of the GNU
@@ -28,17 +27,28 @@
 # ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-#--
-
-# Makefile.am -- Process this file with automake to produce Makefile.in
 
 AM_CFLAGS = -w -g -MP -MD ${COMPILER_FPIC}
 AM_CXXFLAGS = -w -g -MP -MD ${COMPILER_FPIC}
 
-noinst_LIBRARIES = libmuparser.a
-noinst_HEADERS = muParser.h muParserBase.h muParserBytecode.h muParserCallback.h muParserDef.h muParserError.h muParserFixes.h muParserStack.h muParserToken.h muParserTokenReader.h muParserTemplateMagic.h
+noinst_LTLIBRARIES = libmuparser.la
 
-libmuparser_a_SOURCES = \
-	muParserBase.cpp muParserBytecode.cpp muParserCallback.cpp muParser.cpp muParserError.cpp muParserTokenReader.cpp \
-	muParser.h muParserBase.h muParserBytecode.h muParserCallback.h muParserDef.h muParserError.h muParserFixes.h muParserStack.h muParserToken.h muParserTokenReader.h muParserTemplateMagic.h
-
+libmuparser_la_SOURCES = \
+        muParser.cpp \
+        muParser.h \
+        muParserBase.cpp \
+        muParserBase.h \
+        muParserBytecode.cpp \
+        muParserBytecode.h \
+        muParserCallback.cpp \
+        muParserCallback.h \
+        muParserDef.h \
+        muParserError.cpp \
+        muParserError.h \
+        muParserFixes.h \
+        muParserInt.cpp \
+        muParserInt.h \
+        muParserTemplateMagic.h \
+        muParserToken.h \
+        muParserTokenReader.cpp \
+        muParserTokenReader.h

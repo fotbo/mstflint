@@ -354,6 +354,14 @@ int mainEntry(int argc, char* argv[])
         if (cmd_params.device_names.size())
         {
             dev = new MlnxDev(cmd_params.device_names[i].c_str(), cmd_params.compare_ffv);
+            dm_dev_id_t deviceType = dev->getDeviceType();
+            if (dm_is_gpu(deviceType))
+            {
+                print_err("-E- GPU device is not supported\n");
+                delete dev;
+                continue;
+            }
+
             if (cmd_params.clear_semaphore)
             {
                 if (!dev->clearSemaphore())
@@ -373,6 +381,12 @@ int mainEntry(int argc, char* argv[])
         else
         {
             dev = new MlnxDev(&devsinfo[i], cmd_params.compare_ffv);
+            dm_dev_id_t deviceType = dev->getDeviceType();
+            if (dm_is_gpu(deviceType))
+            {
+                delete dev;
+                continue;
+            }
         }
         if (cmd_params.no_fw_ctrl)
         {
@@ -909,7 +923,8 @@ bool checkCmdParams(CmdLineParams& cmd_params, config_t& config)
     if (cmd_params.use_lookup_file)
     {
         cmd_params.lookup_file = adjustRelPath(cmd_params.lookup_file, config.adjuster_path);
-        if (!isFile(cmd_params.lookup_file))
+        Filesystem::path p(cmd_params.lookup_file);
+        if (!Filesystem::is_regular_file(p))
         {
             fprintf(stderr, "-E- Can't find file %s\n", cmd_params.lookup_file.c_str());
             return false;
@@ -917,7 +932,8 @@ bool checkCmdParams(CmdLineParams& cmd_params, config_t& config)
     }
     if (cmd_params.use_mfa_file)
     {
-        if (!isFile(adjustRelPath(cmd_params.mfa_file, config.adjuster_path)))
+        Filesystem::path p(adjustRelPath(cmd_params.mfa_file, config.adjuster_path));
+        if (!Filesystem::is_regular_file(p))
         {
             fprintf(stderr, "-E- Can't find file %s\n", cmd_params.mfa_file.c_str());
             return false;
@@ -926,7 +942,8 @@ bool checkCmdParams(CmdLineParams& cmd_params, config_t& config)
     if (cmd_params.onlineQueryPsids.length() || cmd_params.download || cmd_params.update_online)
     {
         cmd_params.certificate = adjustRelPath(cmd_params.certificate, config.adjuster_path);
-        if (!isFile(cmd_params.certificate))
+        Filesystem::path p(cmd_params.certificate);
+        if (!Filesystem::is_regular_file(p))
         {
             fprintf(stderr, "-E- Can't find Certificate %s\n", cmd_params.certificate.c_str());
             return false;
@@ -1587,7 +1604,7 @@ int getMFAListFromPSIDs(string mfa_path, vector<string>& psid_list, vector<PsidQ
                 errorMsg += imgacc.getlastWarning();
             }
         }
-        else if (isFile(mfa_path))
+        else if (Filesystem::is_regular_file(Filesystem::path(mfa_path)))
         {
             _FileOrDir = 2;
             rc = imgacc.queryPsid(mfa_path, psid_list[i], arch, 1, ri);
@@ -1798,7 +1815,8 @@ bool getIniParams(config_t& config)
     string file = config.exe_path;
     file += "/mlxfwmanager.ini";
 
-    if (!isFile(file))
+    Filesystem::path p(file);
+    if (!Filesystem::is_regular_file(p))
     { // If file does not exist then ignore
         return true;
     }
@@ -2370,7 +2388,15 @@ void printDeviceInfoQuery(int dev_index,
         }
         else if (devs[dev_index]->portOneType == MlnxDev::PORT_IB)
         {
-            print_out("  Base GUID:        %s\n", devs[dev_index]->guidPortOne.c_str());
+            if (!devs[dev_index]->baseGuid.empty() && devs[dev_index]->baseGuid != devs[dev_index]->guidPortOne)
+            {
+                print_out("  Base GUID:        %s\n", devs[dev_index]->baseGuid.c_str());
+                print_out("  Node GUID:        %s\n", devs[dev_index]->guidPortOne.c_str());
+            }
+            else
+            {
+                print_out("  Base GUID:        %s\n", devs[dev_index]->guidPortOne.c_str());
+            }
             if (devs[dev_index]->portTwoType == MlnxDev::PORT_ETH)
             {
                 print_out("  Base MAC:         %s\n", devs[dev_index]->macPortOne.c_str());

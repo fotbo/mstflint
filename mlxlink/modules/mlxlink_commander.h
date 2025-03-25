@@ -364,6 +364,7 @@ public:
     void labeltoDSlocalPort();
     bool isDSdevice();
     void labelToSpectLocalPort();
+    void labelToQtm3LocalPort();
     void labelToIBLocalPort();
     bool isIBSplitReady();
     u_int32_t calculatePanelPort(bool ibSplitReady);
@@ -377,16 +378,14 @@ public:
     bool checkGBPpaosDown();
     bool checkPaosDown();
     bool checkPpaosTestMode();
-    void getSltpParamsFromVector(std::vector<string> sltpParams);
-    void getprbsLanesFromParams(std::vector<string> prbsLanesParams);
-    std::vector<string> parseParamsFromLine(const string& ParamsLine);
     bool isSpect2WithGb();
     bool isIbLocalPortValid(u_int32_t localPort);
     void fillIbPortGroupMap(u_int32_t localPort, u_int32_t labelPort, u_int32_t group, bool splitReady);
     void
       fillEthPortGroupMap(u_int32_t localPort, u_int32_t labelPort, u_int32_t group, u_int32_t width, bool spect2WithGb);
-    int handleIBLocalPort(u_int32_t labelPort, bool ibSplitReady);
-    int handleEthLocalPort(u_int32_t labelPort, bool spect2WithGb);
+    bool handleIBLocalPort(u_int32_t labelPort, bool ibSplitReady);
+    bool handleEthLocalPort(u_int32_t labelPort, bool spect2WithGb);
+    bool handleQTM3LocalPort(u_int32_t labelPort);
     void handleLabelPorts(std::vector<string> labelPortsStr, bool skipException = false);
     vector<string> localToPortsPerGroup(vector<u_int32_t> localPorts);
     u_int32_t getPortGroup(u_int32_t localPort);
@@ -395,7 +394,8 @@ public:
 
     // Mlxlink query functions
     virtual void showModuleInfo();
-    void prepareBerModuleInfoNdr(bool valid);
+    void prepareBerModuleInfo(bool valid, const vector<AmberField>& moduleInfoFields);
+    void pushSnrModuleInfoFields(bool valid);
     void runningVersion();
     virtual void operatingInfoPage();
     virtual void supportedInfoPage();
@@ -405,6 +405,7 @@ public:
     virtual void showBer();
     void prepare40_28_16nmEyeInfo(u_int32_t numOfLanesToUse);
     void prepare7nmEyeInfo(u_int32_t numOfLanesToUse);
+    void prepare5nmEyeInfo(u_int32_t numOfLanesToUse);
     virtual void showEye();
     virtual void showFEC();
     virtual void showSltp();
@@ -427,12 +428,12 @@ public:
     void preparePowerAndCdrSection(bool valid);
     void prepareDDMSection(bool valid, bool isModuleExtSupported);
     virtual void preparePrtlSection();
-    void strToInt32(char* str, u_int32_t& value);
     template<typename T, typename Q>
     string getValueAndThresholdsStr(T value, Q lowTH, Q highTH);
     string getSltpFieldStr(const PRM_FIELD& field);
     void prepareSltpEdrHdrGen(vector<vector<string>>& sltpLanes, u_int32_t laneNumber);
     virtual void prepareSltpNdrGen(vector<vector<string>>& sltpLanes, u_int32_t laneNumber);
+    virtual void prepareSltpXdrGen(vector<vector<string>>& sltpLanes, u_int32_t laneNumber);
     virtual string getSltpHeader();
     void startSlrgPciScan(u_int32_t numOfLanesToUse);
     void initValidDPNList();
@@ -440,6 +441,7 @@ public:
     string getSupportedFecForSpeed(const string& speed);
     string fecMaskToUserInputStr(u_int32_t fecCapMask);
     string fecMaskToStr(u_int32_t mask);
+    void updateSwControlStatus();
 
     void showTestMode();
     void showTestModeBer();
@@ -516,10 +518,10 @@ public:
     // Mlxlink config functions
     void clearCounters();
     void sendPaos();
-    void handlePrbs();
+    virtual void handlePrbs();
     void sendPtys();
     virtual void sendPplm();
-    void sendSltp();
+    virtual void sendSltp();
     void sendPplr();
     void sendPepc();
     void setTxGroupMapping();
@@ -558,27 +560,27 @@ public:
     void checkPplmCap();
     string updateSltpEdrHdrFields();
     string updateSltpNdrFields();
+    virtual string updateSltpXdrFields();
     string getSltpStatus();
     void getSltpAlevOut(u_int32_t lane);
     void getSltpRegAndLeva(u_int32_t lane);
     u_int32_t getLaneSpeed(u_int32_t lane);
     void validateNumOfParamsForNDRGen();
+    void validateNumOfParamsForXDRGen();
     void checkSltpParamsSize();
     bool isMpeinjSupported();
+    u_int32_t getRateFromPptt();
 
     // Mlxlink params
     UserInput _userInput;
     dm_dev_id_t _devID;
     DPN _dpn;
+    vector<u_int32_t> _moduleLanesMapping;
     u_int32_t _numOfLanes;
     u_int32_t _numOfLanesPcie;
     u_int32_t _cableMediaType;
     u_int32_t _fecActive;
     u_int32_t _protoActive;
-    u_int32_t _uniqueCmds;
-    u_int32_t _uniqueCableCmds;
-    u_int32_t _uniquePcieCmds;
-    u_int32_t _networkCmds;
     u_int32_t _anDisable;
     u_int32_t _speedBerCsv;
     u_int32_t _cableIdentifier;
@@ -587,6 +589,7 @@ public:
     u_int32_t _cableLen;
     u_int32_t _activeSpeed;
     u_int32_t _activeSpeedEx;
+    u_int32_t _laneSpeedFromPptt;
     u_int32_t _protoCapability;
     u_int32_t _deviceCapability;
     u_int32_t _protoAdmin;
@@ -597,7 +600,6 @@ public:
     u_int32_t _linkSpeed;
     u_int32_t _groupOpcode;
     string _extAdbFile;
-    string _device;
     string _fwVersion;
     string _speedStrG;
     string _speedForce;
@@ -619,8 +621,9 @@ public:
     bool _ignorePortType;
     bool _ignorePortStatus;
     bool _isGboxPort;
+    bool _isSwControled;
     bool _ignoreIbFECCheck;
-    std::vector<std::string> _ptysSpeeds;
+    bool _isNVLINK;
     std::vector<PortGroup> _localPortsPerGroup;
     std::vector<DPN> _validDpns;
     string _allUnhandledErrors;

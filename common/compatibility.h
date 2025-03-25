@@ -1,6 +1,6 @@
 /*
  * Copyright (C) Jan 2006 Mellanox Technologies Ltd. All rights reserved.
- * Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -41,7 +41,7 @@
 
 #include <stdio.h>
 
-#if defined(__ia64__) || defined(__x86_64__) || defined(__PPC64__) || defined(__arm__)
+#if defined(__ia64__) || defined(__x86_64__) || defined(__PPC64__) || defined(__arm__) || defined(__e2k__)
 #define U64L "l"
 #else
 #define U64L "ll"
@@ -69,6 +69,10 @@
 #define ARCH_arm6l
 #elif defined(__riscv)
 #define ARCH_riscv
+#elif defined(__loongarch_lp64)
+#define ARCH_loongarch64
+#elif defined(__e2k__)
+#define ARCH_e2k
 #else
 #error Unknown CPU architecture using the linux OS
 #endif
@@ -116,7 +120,7 @@
 #define U48H_FMT "0x%012llx"
 #define U64D_FMT_GEN "llu"
 #endif
-#elif defined(ARCH_ia64) || defined(ARCH_x86_64) || defined(ARCH_ppc64) || defined(ARCH_arm64) || defined(ARCH_riscv)
+#elif defined(ARCH_ia64) || defined(ARCH_x86_64) || defined(ARCH_ppc64) || defined(ARCH_arm64) || defined(ARCH_riscv) || defined(ARCH_loongarch64) || defined(ARCH_e2k)
 #define U64D_FMT "%lu"
 #define U64H_FMT "0x%016lx"
 #define U48H_FMT "0x%012lx"
@@ -336,7 +340,6 @@ inline
 
 typedef struct stat Stat;
 
-#include <sys/time.h>
 #include <strings.h>
 
 #endif
@@ -396,13 +399,6 @@ typedef uint32_t u_int32_t;
 typedef uint16_t u_int16_t;
 typedef uint8_t u_int8_t;
 
-#endif
-
-/* define msleep(x) - sleeps for x milliseconds */
-#if defined(_WIN32) || defined(_WIN64) || defined(__MINGW32__) || defined(__MINGW64__)
-#define msleep(x) Sleep(x)
-#else
-#define msleep(x) usleep(((unsigned long)x) * 1000)
 #endif
 
 // Convert BYTES - DWORDS with MEMCPY BE

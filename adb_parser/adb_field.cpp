@@ -37,22 +37,10 @@
  **/
 
 #include "adb_field.h"
-#include <boost/lexical_cast.hpp>
-#include <boost/algorithm/string.hpp>
-#include <boost/filesystem/path.hpp>
-#include <boost/filesystem/operations.hpp>
 #include <iostream>
 
 AdbField::AdbField() :
-    size(0),
-    offset(0xffffffff),
-    definedAsArr(false),
-    lowBound(0),
-    highBound(0),
-    unlimitedArr(false),
-    dynamicArr(false),
-    isReserved(false),
-    userData(0)
+    size(0), offset(0xffffffff), lowBound(0), highBound(0), array_type(), isReserved(false), userData(0)
 {
 }
 
@@ -90,14 +78,7 @@ bool AdbField::operator<(AdbField& other)
  **/
 bool AdbField::isArray()
 {
-    if (unlimitedArr)
-    {
-        return true;
-    }
-    else
-    {
-        return definedAsArr ? true : lowBound != highBound;
-    }
+    return array_type >= ArrayType::definite;
 }
 
 /**
@@ -105,7 +86,7 @@ bool AdbField::isArray()
  **/
 u_int32_t AdbField::arrayLen()
 {
-    if (unlimitedArr)
+    if (array_type >= ArrayType::unlimited)
     {
         return 1;
     }
@@ -120,7 +101,7 @@ u_int32_t AdbField::arrayLen()
  **/
 bool AdbField::isUnlimitedArr()
 {
-    return unlimitedArr;
+    return array_type == ArrayType::unlimited;
 }
 
 /**
@@ -128,7 +109,7 @@ bool AdbField::isUnlimitedArr()
  **/
 bool AdbField::isDynamicArr()
 {
-    return dynamicArr;
+    return array_type == ArrayType::dynamic;
 }
 
 /**
@@ -136,7 +117,7 @@ bool AdbField::isDynamicArr()
  **/
 u_int32_t AdbField::eSize()
 {
-    if (unlimitedArr)
+    if (array_type == ArrayType::unlimited)
     {
         return size;
     }

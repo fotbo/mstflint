@@ -57,11 +57,11 @@ public:
     void writeGvmi(u_int32_t data);
     virtual void updateField(string field_name, u_int32_t value);
     void updateWithDefault(const string& fieldName, const string& fieldsStr, u_int32_t val);
-    void setDefaultFields(const string& fieldsStr);
+    void setDefaultFields(const string& regName, const string& fieldsStr);
     void sendPrmReg(const string& regName, maccess_reg_method_t method, const char* fields, ...);
     void sendPrmReg(const string& regName, maccess_reg_method_t method);
-    virtual u_int32_t getFieldValue(string field_name);
-    string getFieldStr(const string& field);
+    virtual u_int32_t getFieldValue(string field_name, u_int32_t size = 0);
+    string getFieldStr(const string& field, const u_int32_t size = 0);
     string getRawFieldValueStr(const string fieldName);
     u_int32_t getFieldSize(string field_name);
     string getAscii(const string& name, u_int32_t size = 4);
@@ -72,7 +72,9 @@ public:
     u_int32_t _localPort;
     u_int32_t _pnat;
     u_int32_t _portType;
+    int _planeInd;
     bool _isHCA;
+    bool _isSwControled;
 };
 
 #endif /* MLXLINK_REG_PARSER_H */

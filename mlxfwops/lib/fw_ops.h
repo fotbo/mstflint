@@ -43,6 +43,7 @@
 #include "tools_layouts/cx4fw_layouts.h"
 #include "tools_layouts/image_layout_layouts.h"
 #include <mlxsign_lib/mlxsign_lib.h>
+#include "mlxdpa/certcontainerbase.h"
 #ifdef CABLES_SUPP
 #include <cable_access/cable_access.h>
 #endif
@@ -161,7 +162,8 @@ public:
     virtual bool FwExtract4MBImage(vector<u_int8_t>& img,
                                    bool maskMagicPatternAndDevToc,
                                    bool verbose = false,
-                                   bool ignoreImageStart = false);
+                                   bool ignoreImageStart = false,
+                                   bool imageSizeOnly = false);
     virtual bool RestoreDevToc(vector<u_int8_t>& img,
                                char* psid,
                                dm_dev_id_t devid_t,
@@ -257,6 +259,7 @@ public:
                                             int buffSize = 0,
                                             bool ignore_crc_check = false);
     static FwOperations* FwOperationsCreate(fw_ops_params_t& fwParams);
+    static bool IsDeviceSupported(fw_ops_params_t& fwParams);
 
     static bool imageDevOperationsCreate(fw_ops_params_t& devParams,
                                          fw_ops_params_t& imgParams,
@@ -285,6 +288,11 @@ public:
     virtual bool PrintQuery();
     virtual u_int32_t GetDeviceIndex() { return 0; }
     virtual bool QueryComponentData(FwComponent::comps_ids_t comp, u_int32_t deviceIndex, vector<u_int8_t>& data);
+	virtual bool IsCompatibleToDevice(vector<u_int8_t>& data, u_int8_t forceVersion);
+    virtual bool GetRSAPublicKey(vector<u_int8_t>& key);
+    virtual bool ReadMccComponent(vector<u_int8_t>& componentRawData,
+                                  FwComponent::comps_ids_t component,
+                                  ProgressCallBackAdvSt* stProgressFunc = NULL);
 
 #ifndef UEFI_BUILD
     static bool CheckPemKeySize(const string privPemFileStr, u_int32_t& keySize);
@@ -494,7 +502,7 @@ protected:
     enum
     {
         OLD_CNTX_START_POS_SIZE = 6,
-        CNTX_START_POS_SIZE = 10
+        CNTX_START_POS_SIZE = 11
     };
     enum
     {
@@ -668,6 +676,7 @@ protected:
     virtual Tlv_Status_t GetTsObj(TimeStampIFC** tsObj);
     bool TestAndSetTimeStamp(FwOperations* imageOps);
     virtual bool VerifyBranchFormat(const char* vsdString);
+    virtual bool GetDtocAddress(u_int32_t& dTocAddress);
 
     // Protected Members
     FBase* _ioAccess;
@@ -742,7 +751,7 @@ protected:
     static const u_int32_t _fs4_magic_pattern[4];
 };
 
-class CRSpaceRegisters
+class MLXFWOP_API CRSpaceRegisters
 {
 public:
     CRSpaceRegisters(mfile* mf, chip_type_t chip_type);
@@ -750,6 +759,8 @@ public:
     int getGlobalImageStatus();
     life_cycle_t getLifeCycle();
     u_int32_t getSecurityVersion();
+    bool IsLifeCycleSecured();
+    static bool IsLifeCycleSecured(life_cycle_t life_cycle);
 
 private:
     mfile* _mf;

@@ -44,6 +44,7 @@
 #include "fs2_ops.h"
 #include "fsctrl_ops.h"
 #include "fs_comps_factory.h"
+#include "dev_mgt/tools_dev_types.h"
 
 #ifdef CABLES_SUPP
 #include "cablefw_ops.h"
@@ -77,7 +78,7 @@ bool FwOperations::readBufAux(FBase& f, u_int32_t o, void* d, int l, const char*
 int FwOperations::getFileSignature(const char* fname)
 {
     FILE* fin;
-    unsigned char tmpb[16] = {0};
+    unsigned char tmpb[17] = {0};
     int res = IMG_SIG_TYPE_UNKNOWN;
 
     if (!(fin = fopen(fname, "r")))
@@ -94,12 +95,6 @@ int FwOperations::getFileSignature(const char* fname)
     if (tmpb[0] == 0xCC && tmpb[1] == 0 && tmpb[2] == 0xCC && tmpb[3] == 1)
     {
         res = IMG_SIG_TYPE_CC;
-        fclose(fin);
-        return res;
-    }
-
-    if (strlen((const char*)tmpb) < 4)
-    {
         fclose(fin);
         return res;
     }
@@ -402,7 +397,7 @@ const u_int32_t FwOperations::_cntx_magic_pattern[4] = {0x4D544657, // Ascii of 
 const u_int32_t FwOperations::_fs4_magic_pattern[4] = {0x4D544657, 0xABCDEF00, 0xFADE1234, 0x5678DEAD};
 
 const u_int32_t FwOperations::_cntx_image_start_pos[FwOperations::CNTX_START_POS_SIZE] = {
-  0, 0x10000, 0x20000, 0x40000, 0x80000, 0x100000, 0x200000, 0x400000, 0x800000, 0x1000000};
+  0, 0x10000, 0x20000, 0x40000, 0x80000, 0x100000, 0x200000, 0x400000, 0x800000, 0x1000000, 0x2000000};
 
 bool FwOperations::FindMagicPattern(FBase* ioAccess, u_int32_t addr, u_int32_t const cntx_magic_pattern[])
 {
@@ -921,6 +916,28 @@ const char* file_handle_type_to_str(fw_hndl_type_t type)
     }
 }
 
+bool FwOperations::IsDeviceSupported(fw_ops_params_t& fwParams)
+{
+    mfile* mf = mopen_adv(fwParams.mstHndl, (MType)(MST_DEFAULT | MST_LINKX_CHIP));
+    if (!mf)
+    {
+        return false;
+    }
+
+    dm_dev_id_t devid_t = DeviceUnknown;
+    u_int32_t devid = 0;
+    u_int32_t revid = 0;
+    dm_get_device_id(mf, &devid_t, &devid, &revid);
+    if (dm_is_gpu(devid_t))
+    {
+        mclose(mf);
+        WriteToErrBuff(fwParams.errBuff, (char*)"GPUs are not supported.", fwParams.errBuffSize);
+        return false;
+    }
+    mclose(mf);
+    return true;
+}
+
 FwOperations* FwOperations::FwOperationsCreate(fw_ops_params_t& fwParams)
 {
     DPRINTF(("FwOperations::FwOperationsCreate\n"));
@@ -929,6 +946,10 @@ FwOperations* FwOperations::FwOperationsCreate(fw_ops_params_t& fwParams)
     FBase* ioAccess = (FBase*)NULL;
     FwCompsMgr* fwCompsAccess = (FwCompsMgr*)NULL;
     bool getFwFormatFromImg = false;
+    if (fwParams.hndlType == FHT_MST_DEV && !IsDeviceSupported(fwParams))
+    {
+        return (FwOperations*)NULL;
+    }
 #ifdef CABLES_SUPP
     if (fwParams.hndlType == FHT_CABLE_DEV)
     {
@@ -1428,6 +1449,7 @@ const FwOperations::HwDevData FwOperations::hwDevData[] = {
   {"ConnectX-6LX", CX6LX_HW_ID, CT_CONNECTX6LX, CFT_HCA, 0, {4127, 0}, {{UNKNOWN_BIN, {0}}}},
   {"ConnectX-7", CX7_HW_ID, CT_CONNECTX7, CFT_HCA, 0, {4129, 0}, {{UNKNOWN_BIN, {0}}}},
   {"ConnectX-8", CX8_HW_ID, CT_CONNECTX8, CFT_HCA, 0, {4131, 0}, {{UNKNOWN_BIN, {0}}}},
+  {"ConnectX-9", CX9_HW_ID, CT_CONNECTX9, CFT_HCA, 0, {4133, 0}, {{UNKNOWN_BIN, {0}}}},
   {"BlueField", BF_HW_ID, CT_BLUEFIELD, CFT_HCA, 0, {41680, 41681, 41682, 0}, {{UNKNOWN_BIN, {0}}}},
   {"BlueField2", BF2_HW_ID, CT_BLUEFIELD2, CFT_HCA, 0, {41684, 41685, 41686, 0}, {{UNKNOWN_BIN, {0}}}},
   {"BlueField3", BF3_HW_ID, CT_BLUEFIELD3, CFT_HCA, 0, {41690, 41691, 41692, 0}, {{UNKNOWN_BIN, {0}}}},
@@ -1443,6 +1465,7 @@ const FwOperations::HwDevData FwOperations::hwDevData[] = {
   {"Gearbox", GEARBOX_HW_ID, CT_GEARBOX, CFT_GEARBOX, 0, {0, 0}, {{UNKNOWN_BIN, {0}}}},
   {"GearboxManager", GB_MANAGER_HW_ID, CT_GEARBOX_MGR, CFT_GEARBOX, 0, {0, 0}, {{UNKNOWN_BIN, {0}}}},
   {"AbirGearbox", ABIR_GB_HW_ID, CT_ABIR_GEARBOX, CFT_GEARBOX, 0, {0, 0}, {{UNKNOWN_BIN, {0}}}},
+  {"ArcusE", ARCUSE_HW_ID, CT_ARCUSE, CFT_SWITCH, 0, {45568, 0}, {{UNKNOWN_BIN, {0}}}},
   {(char*)NULL, 0, CT_UNKNOWN, CFT_UNKNOWN, 0, {0}, {{UNKNOWN_BIN, {0}}}}, // zero devid terminator
 };
 
@@ -1459,6 +1482,7 @@ const FwOperations::HwDev2Str FwOperations::hwDev2Str[] = {
   {"ConnectX-6LX", CX6LX_HW_ID, 0x00},
   {"ConnectX-7", CX7_HW_ID, 0x00},
   {"ConnectX-8", CX8_HW_ID, 0x00},
+  {"ConnectX-9", CX9_HW_ID, 0x00},
   {"BlueField", BF_HW_ID, 0x00},
   {"BlueField2", BF2_HW_ID, 0x00},
   {"BlueField3", BF3_HW_ID, 0x00},
@@ -2464,15 +2488,8 @@ bool FwOperations::burnEncryptedImage(FwOperations*, ExtBurnParams&)
     return errmsg("Burning encrypted image not supported");
 }
 
-bool FwOperations::FwExtract4MBImage(vector<u_int8_t>& img,
-                                     bool maskMagicPatternAndDevToc,
-                                     bool verbose,
-                                     bool ignoreImageStart)
+bool FwOperations::FwExtract4MBImage(vector<u_int8_t>& img, bool, bool , bool, bool)
 {
-    (void)img;
-    (void)maskMagicPatternAndDevToc;
-    (void)verbose;
-    (void)ignoreImageStart;
     return errmsg("FwExtract4MBImage not supported");
 }
 
@@ -2504,6 +2521,12 @@ bool FwOperations::FwSetForbiddenVersions(char* fname, PrintCallBack callBackFun
     return errmsg("FwSetForbiddenVersions not supported");
 }
 
+bool FwOperations::GetRSAPublicKey(vector<u_int8_t>& key)
+{
+    (void)key;
+    return errmsg("GetRSAPublicKey not supported");
+}
+
 bool FwOperations::FwReadBlock(u_int32_t addr, u_int32_t size, std::vector<u_int8_t>& dataVec)
 {
     if (addr + size > _ioAccess->get_effective_size())
@@ -2522,6 +2545,7 @@ bool FwOperations::FwReadBlock(u_int32_t addr, u_int32_t size, std::vector<u_int
 // TODO - use dm_dev_is_fs3/4/5 from tools_dev_types.c and remove this function
 u_int8_t FwOperations::GetFwFormatFromHwDevID(u_int32_t hwDevId)
 {
+    // TODO - remove QTM3/CX8/BF4/ARCUSE from FS4
     if ((hwDevId == CX3_HW_ID) || (hwDevId == CX3_PRO_HW_ID))
     {
         return FS_FS2_GEN;
@@ -2532,15 +2556,15 @@ u_int8_t FwOperations::GetFwFormatFromHwDevID(u_int32_t hwDevId)
         return FS_FS3_GEN;
     }
     else if (hwDevId == CX5_HW_ID || hwDevId == CX6_HW_ID || hwDevId == CX6DX_HW_ID || hwDevId == CX6LX_HW_ID ||
-             hwDevId == CX7_HW_ID || hwDevId == CX8_HW_ID || hwDevId == BF_HW_ID || hwDevId == BF2_HW_ID ||
-             hwDevId == BF3_HW_ID || hwDevId == BF4_HW_ID || hwDevId == QUANTUM_HW_ID || hwDevId == QUANTUM2_HW_ID ||
-             hwDevId == QUANTUM3_HW_ID || hwDevId == SPECTRUM4_HW_ID || hwDevId == SPECTRUM2_HW_ID ||
-             hwDevId == SPECTRUM3_HW_ID || hwDevId == GEARBOX_HW_ID || hwDevId == GB_MANAGER_HW_ID ||
-             hwDevId == ABIR_GB_HW_ID)
+             hwDevId == CX7_HW_ID || hwDevId == BF_HW_ID || hwDevId == BF2_HW_ID || hwDevId == BF3_HW_ID ||
+             hwDevId == BF4_HW_ID || hwDevId == QUANTUM_HW_ID || hwDevId == QUANTUM2_HW_ID ||
+             hwDevId == SPECTRUM4_HW_ID || hwDevId == SPECTRUM3_HW_ID || hwDevId == SPECTRUM2_HW_ID ||
+             hwDevId == GEARBOX_HW_ID || hwDevId == GB_MANAGER_HW_ID || hwDevId == ABIR_GB_HW_ID)
     {
         return FS_FS4_GEN;
     }
-    else if ((hwDevId == QUANTUM3_HW_ID) || (hwDevId == CX8_HW_ID) || (hwDevId == BF4_HW_ID))
+    else if ((hwDevId == QUANTUM3_HW_ID) || (hwDevId == CX8_HW_ID) || (hwDevId == BF4_HW_ID) ||
+             (hwDevId == ARCUSE_HW_ID) || (hwDevId == CX9_HW_ID))
     {
         return FS_FS5_GEN;
     }
@@ -2782,6 +2806,11 @@ bool FwOperations::VerifyBranchFormat(const char* vsdString)
     return false;
 }
 
+bool FwOperations::GetDtocAddress(u_int32_t& dTocAddress)
+{
+    return errmsg("GetDtocAddress not supported.");
+}
+
 bool FwOperations::PrintQuery()
 {
     return errmsg("PrintQuery not supported.");
@@ -2811,12 +2840,23 @@ bool FwOperations::QueryComponentData(FwComponent::comps_ids_t comp, u_int32_t d
     return errmsg("GetComponentData is not supported");
 }
 
+bool FwOperations::ReadMccComponent(vector<u_int8_t>&, FwComponent::comps_ids_t, ProgressCallBackAdvSt*)
+{
+    return errmsg("ReadMccComponent is not supported");
+}
+
+bool FwOperations::IsCompatibleToDevice(vector<u_int8_t>& data, u_int8_t forceVersion)
+{
+    return errmsg("IsCompatibleToDevice is not supported");
+}
+
 bool FwOperations::IsExtendedGuidNumSupported()
 {
     bool isSupported = false;
     switch (_fwImgInfo.supportedHwId[0])
     {
         case SPECTRUM4_HW_ID:
+        case QUANTUM3_HW_ID:
             isSupported = true;
             break;
         default:
@@ -2858,7 +2898,8 @@ life_cycle_t CRSpaceRegisters::getLifeCycle()
     size_t lifeCycleAddress = 0;
     u_int8_t firstBit = 0;
     u_int8_t bitLen = 0;
-    u_int32_t lifeCycle;
+    life_cycle_t lifeCycle;
+    lifeCycle.version_field = 0;
 
     switch (_chip_type)
     {
@@ -2875,9 +2916,7 @@ life_cycle_t CRSpaceRegisters::getLifeCycle()
             bitLen = 2;
             break;
         case CT_CONNECTX7:
-        case CT_CONNECTX8:
         case CT_QUANTUM2:
-        case CT_QUANTUM3:
         case CT_BLUEFIELD3:
         case CT_BLUEFIELD4:
         case CT_SPECTRUM4:
@@ -2885,13 +2924,39 @@ life_cycle_t CRSpaceRegisters::getLifeCycle()
             firstBit = 4;
             bitLen = 2;
             break;
+        case CT_CONNECTX8:
+        case CT_QUANTUM3:
+        case CT_ARCUSE:
+            lifeCycleAddress = 0xf0000;
+            firstBit = 16;
+            bitLen = 3;
+            lifeCycle.version_field = 1;
+            break;
         default:
             throw logic_error("-E- life_cycle query is not implemented for the current device.");
             break;
     }
 
-    lifeCycle = getRegister(lifeCycleAddress);
-    return (life_cycle_t)getConsecutiveBits(lifeCycle, firstBit, bitLen);
+    lifeCycle.value = getConsecutiveBits(getRegister(lifeCycleAddress), firstBit, bitLen);
+
+    return lifeCycle;
+}
+
+bool CRSpaceRegisters::IsLifeCycleSecured(life_cycle_t life_cycle)
+{
+    if (life_cycle.version_field == 1)
+    {
+        return (life_cycle.value == FS5_LC_PRE_PRODUCTION || life_cycle.value == FS5_LC_PRODUCTION);
+    }
+    else
+    {
+        return life_cycle.value == FS4_LC_GA_SECURED;
+    }
+}
+
+bool CRSpaceRegisters::IsLifeCycleSecured()
+{
+    return IsLifeCycleSecured(getLifeCycle());
 }
 
 int CRSpaceRegisters::getGlobalImageStatus()
@@ -2904,14 +2969,18 @@ int CRSpaceRegisters::getGlobalImageStatus()
         case CT_CONNECTX6DX:
         case CT_CONNECTX6LX:
         case CT_CONNECTX7:
-        case CT_CONNECTX8:
         case CT_BLUEFIELD2:
         case CT_BLUEFIELD3:
         case CT_BLUEFIELD4:
             global_image_status_address = 0xE3044;
             break;
+        case CT_CONNECTX8:
+            global_image_status_address = 0x55084;
+            break;
         case CT_QUANTUM2:
         case CT_QUANTUM3:
+            global_image_status_address = 0x152080;
+            break;
         case CT_SPECTRUM4:
             global_image_status_address = 0xa1844;
             break;

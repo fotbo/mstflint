@@ -43,12 +43,7 @@
 #include <vector>
 #include <iostream>
 #include <compatibility.h>
-#if __cplusplus >= 201402L || defined(_MSC_VER)
-#include <regex>
-#else
-#include <boost/regex.hpp>
-using namespace boost;
-#endif
+#include "common/tools_regex.h"
 #include "mlxarchive_mfa2_package_gen.h"
 #include <cmdparser/cmdparser.h>
 #include "mlxarchive.h"
@@ -119,7 +114,7 @@ void Mlxarchive::paramValidate()
     std::string err = "Missing mandatory parameter: %s\n";
     std::string big_err = "Missing mandatory parameters: %s %s %s\n";
     std::string err_regex = "Bad format in: %s(%s), the format should be like: %s\n";
-    smatch match;
+    mstflint::common::regex::smatch match;
     bool status_match;
     bool success = true;
     if (!_mfa2file.empty())
@@ -162,7 +157,8 @@ void Mlxarchive::paramValidate()
         {
             if (fexists(_outFile))
             {
-                if (!isFile(_outFile))
+                Filesystem::path p(_outFile);
+                if (!Filesystem::is_regular_file(p))
                 {
                     fprintf(stderr, "Output file: %s is expected to be a file\n", _outFile.c_str());
                 }
@@ -180,8 +176,8 @@ void Mlxarchive::paramValidate()
         }
         else
         {
-            regex version_expression("^[0-9].[0-9].[0-9]$");
-            status_match = regex_match(_version, match, version_expression);
+            mstflint::common::regex::regex version_expression("^[0-9].[0-9].[0-9]$");
+            status_match = mstflint::common::regex::regex_match(_version, match, version_expression);
             if (!status_match)
             {
                 fprintf(stderr, err_regex.c_str(), "version", _version.c_str(), "x.x.x");

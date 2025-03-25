@@ -50,14 +50,10 @@
 
 #include <tools_layouts/tools_open_layouts.h>
 #include <tools_layouts/reg_access_hca_layouts.h>
+#include <mft_utils.h>
 #include "mlxcfg_utils.h"
-#if __cplusplus >= 201402L || defined(_MSC_VER)
-#include <regex>
-#elif !defined(MST_UL)
-#include <boost/regex.hpp>
-using namespace boost;
-#endif
 
+#include "common/tools_regex.h"
 using namespace std;
 
 typedef struct reg_access_hca_mqis_reg_ext mqisReg;
@@ -148,24 +144,21 @@ MError nvqcCom5thGen(mfile* mf, u_int32_t tlvType, bool& suppRead, bool& suppWri
 
 MError nvdiCom5thGen(mfile* mf, u_int32_t tlvType)
 {
-    struct reg_access_hca_mnvdi_reg_ext nvdiTlv;
-    memset(&nvdiTlv, 0, sizeof(struct reg_access_hca_mnvdi_reg_ext));
+    struct tools_open_mnvdi mnvdiTlv;
+    memset(&mnvdiTlv, 0, sizeof(struct tools_open_mnvdi));
 
-    nvdiTlv.configuration_item_header.length = 0;
-    // nvdiTlv.configuration_item_header.rd_en = 0;
-    // nvdiTlv.configuration_item_header.over_en = 1; // ask Dan
-
+    mnvdiTlv.nv_hdr.rd_en = 0;
+    mnvdiTlv.nv_hdr.over_en = 1;
+    mnvdiTlv.nv_hdr.writer_id = WRITER_ID_ICMD_MLXCONFIG;
     // tlvType should be in the correct endianess
-    nvdiTlv.configuration_item_header.type_class = __be32_to_cpu(tlvType) & 0xF000;
-    nvdiTlv.configuration_item_header.type_index = __be32_to_cpu(tlvType) & 0x0FFF;
-    printf("type_class = %d\n", nvdiTlv.configuration_item_header.type_class); // should be some number between 0-9
+    mnvdiTlv.nv_hdr.type.tlv_type_dw.tlv_type_dw = __be32_to_cpu(tlvType);
 
     MError rc;
     // "suspend" signals as we are going to take semaphores
     mft_signal_set_handling(1);
-    // DEBUG_PRINT_SEND(&nvdiTlv, nvdi);
-    rc = reg_access_mnvdi(mf, REG_ACCESS_METHOD_SET, &nvdiTlv);
-    // DEBUG_PRINT_RECEIVE(&nvdiTlv, nvdi);
+    // DEBUG_PRINT_SEND(&mnvdiTlv, mnvdi);
+    rc = reg_access_mnvdi(mf, REG_ACCESS_METHOD_SET, &mnvdiTlv);
+    // DEBUG_PRINT_RECEIVE(&mnvdiTlv, mnvdi);
     dealWithSignal();
     if (rc)
     {
@@ -206,6 +199,19 @@ string numToStr(u_int32_t num, bool isHex)
     }
 
     ss << num;
+    return ss.str();
+}
+
+string numToStrFormatted(u_int32_t num, bool isHex)
+{
+    stringstream ss;
+
+    if (isHex)
+    {
+        ss << std::uppercase << std::hex;
+    }
+
+    ss << std::setfill('0') << std::setw(8) << num;
     return ss.str();
 }
 
@@ -428,11 +434,11 @@ string getArraySuffix(const string& mlxconfigName)
     (void)mlxconfigName;
     return "";
 #else
-    static const regex EXP_PATTERN("(_[0-9]{2}_[0-9]+)");
+    static const mstflint::common::regex::regex EXP_PATTERN("(_[0-9]{2}_[0-9]+)");
     string suffix = "";
-    smatch match;
+    mstflint::common::regex::smatch match;
 
-    if (regex_search(mlxconfigName, match, EXP_PATTERN))
+    if (mstflint::common::regex::regex_search(mlxconfigName, match, EXP_PATTERN))
     {
         suffix = match.str();
     }
@@ -525,6 +531,27 @@ bool getDeviceInformationString(mfile* mf, info_type_t op, vector<char>& infoStr
         return false;
     }
     return true;
+}
+
+Device_Type getDeviceTypeFromString(string inStr)
+{
+    mft_utils::to_lowercase(inStr);
+    if (inStr == "switch")
+    {
+        return Device_Type::Switch;
+    }
+    else if (inStr == "hca")
+    {
+        return Device_Type::HCA;
+    }
+    else if (inStr == "retimer")
+    {
+        return Device_Type::Retimer;
+    }
+    else
+    {
+        return Device_Type::UNSUPPORTED_DEVICE;
+    }
 }
 
 MlxcfgException::MlxcfgException(const char* fmt, ...)

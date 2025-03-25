@@ -136,6 +136,9 @@ typedef struct
     bool sec_boot;
     life_cycle_t life_cycle;
     bool encryption;
+    u_int32_t ini_file_version;
+    u_int8_t geo_address;
+    bool geo_address_valid;
 
 } fwInfoT;
 
@@ -191,6 +194,10 @@ public:
         COMPID_CRCS_TOKEN = 0x10,
         COMPID_CRDT_TOKEN = 0x11,
         COMPID_CLOCK_SYNC_EEPROM = 0x12,
+        DIGITAL_CACERT = 0x15,
+        DIGITAL_CACERT_CHAIN = 0x16,
+        DIGITAL_CACERT_REMOVAL = 0x17,
+        DIGITAL_CACERT_CHAIN_REMOVAL = 0x18,
         COMPID_UNKNOWN = 0xff,
     } comps_ids_t;
 
@@ -283,6 +290,8 @@ typedef enum
     FWCOMPS_MCC_REJECTED_LINKX_ACTIVATE = 0x116,
     FWCOMPS_MCC_REJECTED_INCOMPATIBLE_FLASH = 0x117,
     FWCOMPS_MCC_REJECTED_TOKEN_ALREADY_APPLIED = 0x118,
+    FWCOMPS_MCC_REJECTED_FW_BURN_DRAM_NOT_AVAILABLE = 0x119,
+    FWCOMPS_MCC_REJECTED_FLASH_WP = 0x129,
 
     // errors regarding REG_ACCESS
     FWCOMPS_REG_ACCESS_OK = 0,
@@ -424,6 +433,14 @@ public:
     void GenerateHandle();
     bool isMCDDSupported() { return _isDmaSupported; };
     bool IsSecondaryHost(bool& isSecondary);
+    bool runPGUID(reg_access_hca_pguid_reg_ext* guidsInfo,
+                  u_int32_t local_port = 0,
+                  u_int8_t pnat = 0,
+                  u_int32_t lp_msb = 0);
+    bool queryPGUID(fw_info_t* fwInfo,
+                    u_int32_t local_port = 0,
+                    u_int8_t pnat = 0,
+                    u_int32_t lp_msb = 0);
 
 private:
     typedef enum
@@ -485,7 +502,9 @@ private:
         MCC_ERRCODE_REJECTED_LINKX_TRANSFER = 0x14,
         MCC_ERRCODE_REJECTED_LINKX_ACTIVATE = 0x15,
         MCC_ERRCODE_REJECTED_INCOMPATIBLE_FLASH = 0x16,
-        MCC_ERRCODE_REJECTED_TOKEN_ALREADY_APPLIED = 0x17
+        MCC_ERRCODE_REJECTED_TOKEN_ALREADY_APPLIED = 0x17,
+        MCC_ERRCODE_REJECTED_FW_BURN_DRAM_NOT_AVAILABLE = 0x18,
+        MCC_ERRCODE_REJECTED_FLASH_WP = 0x28
     } mcc_command_error_t;
 
     typedef enum
@@ -559,6 +578,8 @@ private:
     bool IsDevicePresent(FwComponent::comps_ids_t compType);
 
     std::vector<comp_query_st> _compsQueryMap;
+    bool _fwSupport;
+    bool _handleGenerated;
     bool _refreshed;
     bool _clearSetEnv;
     bool _openedMfile;

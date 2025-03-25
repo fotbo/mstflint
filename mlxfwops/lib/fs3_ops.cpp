@@ -1,6 +1,6 @@
 /*
  * Copyright (C) Jan 2013 Mellanox Technologies Ltd. All rights reserved.
- * Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -36,8 +36,9 @@
 #include <algorithm>
 #include <vector>
 
-#include <tools_utils.h>
-#include <bit_slice.h>
+#include "common/tools_utils.h"
+#include "common/tools_time.h"
+#include "common/bit_slice.h"
 #include <mtcr.h>
 #include <reg_access/reg_access.h>
 
@@ -102,6 +103,12 @@ const Fs3Operations::SectionInfo Fs3Operations::_fs3SectionsInfoArr[] = {
   {FS3_ACE_CODE, "ACE_CODE"},
   {FS3_ROM_CODE, "ROM_CODE"},
   {FS3_RESET_INFO, "RESET_INFO"},
+  {FS4_PROG_FW_META, "PROG_FW_META"},
+  {FS4_PROG_FW_BIN, "PROG_FW_BIN"},
+  {FS4_PRE_LINK_CODE, "PRE_LINK_CODE"},
+  {FS4_PRE_LINK_DATA, "PRE_LINK_DATA"},
+  {FS4_POST_LINK_CODE, "POST_LINK_CODE"},
+  {FS4_POST_LINK_DATA, "POST_LINK_DATA"},
   {FS3_DBG_FW_INI, "DBG_FW_INI"},
   {FS3_DBG_FW_PARAMS, "DBG_FW_PARAMS"},
   {FS3_FW_ADB, "FW_ADB"},
@@ -109,6 +116,7 @@ const Fs3Operations::SectionInfo Fs3Operations::_fs3SectionsInfoArr[] = {
   {FS4_TILE_FW_CODE, "TILE_FW_CODE"},
   {FS4_FW_TILE_INI, "FW_TILE_INI"},
   {FS4_HW_TILE_INI, "HW_TILE_INI"},
+  {FS4_SLOT_DEPENDENT_INI, "SLOT_DEPENDENT_INI"},
   {FS3_IMAGE_SIGNATURE_256, "IMAGE_SIGNATURE_256"},
   {FS3_PUBLIC_KEYS_2048, "PUBLIC_KEYS_2048"},
   {FS3_PUBLIC_KEYS_4096, "PUBLIC_KEYS_4096"},
@@ -134,15 +142,30 @@ const Fs3Operations::SectionInfo Fs3Operations::_fs3SectionsInfoArr[] = {
   {FS4_LC_INI2_TABLE, "LC_INI2_TABLE"},
   {FS4_LC_INI_NV_DATA, "LC_INI_NV_DATA"},
   {FS4_CERT_CHAIN_0, "CERT_CHAIN_0"},
+  {FS5_SECURITY_LOG, "SECURITY_LOG"},
   {FS4_DIGITAL_CACERT_RW, "DIGITAL_CACERT_RW"},
+  {FS4_CERTIFICATE_CHAINS_1, "CERTIFICATE_CHAINS_1"},
+  {FS4_CERTIFICATE_CHAINS_2, "CERTIFICATE_CHAINS_2"},
+  {FS4_ROOT_CERTIFICATES_1, "ROOT_CERTIFICATES_1"},
+  {FS4_ROOT_CERTIFICATES_2, "ROOT_CERTIFICATES_2"},
+  {FS4_TOOLS_AREA, "TOOLS_AREA"},
   {FS3_DTOC, "DTOC_HEADER"},
   {FS4_HW_PTR, "HW_POINTERS"},
-  {FS4_TOOLS_AREA, "TOOLS_AREA"},
+  {FS4_FW_DEBUG_DUMP, "FW_DEBUG_DUMP"},
+  {FS4_FW_DEBUG_DUMP_2, "FW_DEBUG_DUMP_2"},
   {FS4_RSA_PUBLIC_KEY, "RSA_PUBLIC_KEY"},
   {FS4_RSA_4096_SIGNATURES, "RSA_4096_SIGNATURES"},
   {FS4_EXCLKSYNC_INFO, "EXCLKSYNC_INFO"},
+  {FS4_ENCRYPTION_KEY_TRANSITION, "ENCRYPTION_KEY_TRANSITION"},
+  {FS4_PXIR_INI, "PXIR_INI"},
+  {FS4_PXIR_INI1, "PXIR_INI1"},
+  {FS4_NVDA_ROT_CERTIFICATES, "NVDA_ROT_CERTIFICATES"},
   {FS4_MAIN_HASHES_PAGES, "MAIN_HASHES_PAGES"},
   {FS4_MAIN_LOCKED_HASHES_PAGES, "MAIN_LOCKED_HASHES_PAGES"},
+  {FS4_STRN_MAIN, "STRN_MAIN"},
+  {FS4_STRN_IRON, "STRN_IRON"},
+  {FS4_STRN_TILE, "STRN_TILE"},
+  {FS4_MAIN_DATA, "MAIN_DATA"},
   {FS4_HASHES_TABLE, "HASHES_TABLE"}};
 
 bool Fs3Operations::Fs3UpdateImgCache(u_int8_t* buff, u_int32_t addr, u_int32_t size)
@@ -246,7 +269,7 @@ bool Fs3Operations::GetMfgInfo(u_int8_t* buff)
         memcpy(&_fs3ImgInfo.ext_info.orig_fs3_uids_info.image_layout_uids, &mfg_info.guids, sizeof(mfg_info.guids));
         strcpy(_fs3ImgInfo.ext_info.orig_psid, mfg_info.psid);
         _fs3ImgInfo.ext_info.guids_override_en = mfg_info.guids_override_en;
-        _fs3ImgInfo.ext_info.orig_fs3_uids_info.valid_field = 1;
+        _fs3ImgInfo.ext_info.orig_fs3_uids_info.guid_format = IMAGE_LAYOUT_UIDS;
     }
     else if (CHECK_MFG_OLD_FORMAT(cib_mfg_info))
     {
@@ -254,7 +277,7 @@ bool Fs3Operations::GetMfgInfo(u_int8_t* buff)
         memcpy(&_fs3ImgInfo.ext_info.orig_fs3_uids_info.cib_uids, &cib_mfg_info.guids, sizeof(cib_mfg_info.guids));
         strcpy(_fs3ImgInfo.ext_info.orig_psid, cib_mfg_info.psid);
         _fs3ImgInfo.ext_info.guids_override_en = cib_mfg_info.guids_override_en;
-        _fs3ImgInfo.ext_info.orig_fs3_uids_info.valid_field = 0;
+        _fs3ImgInfo.ext_info.orig_fs3_uids_info.guid_format = CIB_UIDS;
     }
     else
     {
@@ -273,28 +296,6 @@ bool Fs3Operations::GetMfgInfo(u_int8_t* buff)
     }
     return true;
 }
-
-#define RESIGN_MSG "-W- The image requires to be signed by a valid key, run sign command before applying.\n"
-
-#define INSERT_SHA_IF_NEEDS(callBackF)                                            \
-    do                                                                            \
-    {                                                                             \
-        if (!_ioAccess->is_flash())                                               \
-        {                                                                         \
-            if (!(_fs3ImgInfo.ext_info.security_mode & SMM_SIGNED_FW))            \
-            {                                                                     \
-                PRINT_PROGRESS(callBackF, (char*)"-I- Updating image digest.\n"); \
-                if (!FwInsertSHA256((PrintCallBack)NULL))                         \
-                {                                                                 \
-                    return false;                                                 \
-                }                                                                 \
-            }                                                                     \
-            else                                                                  \
-            {                                                                     \
-                PRINT_PROGRESS(callBackF, (char*)RESIGN_MSG);                     \
-            }                                                                     \
-        }                                                                         \
-    } while (0)
 
 bool Fs3Operations::GetImageInfo(u_int8_t* buff)
 {
@@ -331,6 +332,8 @@ bool Fs3Operations::GetImageInfo(u_int8_t* buff)
     _fwImgInfo.ext_info.fw_rel_time[2] = (u_int16_t)image_info.FW_VERSION.Seconds;
 
     _fwImgInfo.ext_info.burn_image_size = image_info.burn_image_size;
+    _fwImgInfo.ext_info.dtoc_offset = image_info.dtoc_offset;
+    _fwImgInfo.ext_info.sku = (device_sku)image_info.psc_sku;
 
     /* assuming number of supported_hw_id < MAX_NUM_SUPP_HW_IDS */
     memcpy(_fwImgInfo.supportedHwId, image_info.supported_hw_id, sizeof(image_info.supported_hw_id));
@@ -348,18 +351,15 @@ bool Fs3Operations::GetImageInfo(u_int8_t* buff)
         struct tools_open_image_info tools_image_info;
         memset(&tools_image_info, 0, sizeof(tools_image_info));
         tools_open_image_info_unpack(&tools_image_info, buff);
-        strncpy(_fs3ImgInfo.ext_info.name, tools_image_info.name, NAME_LEN);
-        strncpy(_fs3ImgInfo.ext_info.description, tools_image_info.description, DESCRIPTION_LEN);
-        strncpy(_fs3ImgInfo.ext_info.prs_name, tools_image_info.prs_name, FS3_PRS_NAME_LEN);
+        strncpy(_fs3ImgInfo.ext_info.name, tools_image_info.name, strlen(tools_image_info.name));
+        strncpy(_fs3ImgInfo.ext_info.description, tools_image_info.description, strlen(tools_image_info.description));
+        strncpy(_fs3ImgInfo.ext_info.prs_name, tools_image_info.prs_name, strlen(tools_image_info.prs_name));
     }
     else if (image_info.minor_version == 3)
     {
-        strncpy(_fs3ImgInfo.ext_info.name, image_info.name, NAME_LEN);
-        _fs3ImgInfo.ext_info.name[NAME_LEN - 1] = '\0';
-        strncpy(_fs3ImgInfo.ext_info.description, image_info.description, DESCRIPTION_LEN);
-        _fs3ImgInfo.ext_info.description[DESCRIPTION_LEN - 1] = '\0';
-        strncpy(_fs3ImgInfo.ext_info.prs_name, image_info.prs_name, FS3_PRS_NAME_LEN);
-        _fs3ImgInfo.ext_info.prs_name[FS3_PRS_NAME_LEN - 1] = '\0';
+        strncpy(_fs3ImgInfo.ext_info.name, image_info.name, strlen(image_info.name));
+        strncpy(_fs3ImgInfo.ext_info.description, image_info.description, strlen(image_info.description));
+        strncpy(_fs3ImgInfo.ext_info.prs_name, image_info.prs_name, strlen(image_info.prs_name));
     }
 
     _fs3ImgInfo.ext_info.mcc_en = image_info.mcc_en;
@@ -369,8 +369,9 @@ bool Fs3Operations::GetImageInfo(u_int8_t* buff)
        ((image_info.secure_fw == 1) ? SMM_SECURE_FW : 0));
 
     _fs3ImgInfo.runFromAny = image_info.image_size.run_from_any;
-    const u_int32_t* swId = (u_int32_t*)NULL;
+    _fs3ImgInfo.logStep = image_info.image_size.log_step;
 
+    const u_int32_t* swId = (u_int32_t*)NULL;
     DPRINTF(("Fs3Operations::GetImageInfo _fwImgInfo.supportedHwId[0]=0x%x\n", _fwImgInfo.supportedHwId[0]));
     if (!getInfoFromHwDevid(_fwImgInfo.supportedHwId[0], _fwImgInfo.ext_info.chip_type, &swId))
     {
@@ -434,7 +435,7 @@ bool Fs3Operations::GetDevInfo(u_int8_t* buff)
         CHECK_UID_STRUCTS_SIZE(_fs3ImgInfo.ext_info.fs3_uids_info.image_layout_uids, device_info.guids);
         memcpy(&_fs3ImgInfo.ext_info.fs3_uids_info.image_layout_uids, &device_info.guids, sizeof(device_info.guids));
         strcpy(_fwImgInfo.ext_info.vsd, device_info.vsd);
-        _fs3ImgInfo.ext_info.fs3_uids_info.valid_field = 1;
+        _fs3ImgInfo.ext_info.fs3_uids_info.guid_format = IMAGE_LAYOUT_UIDS;
         _fwImgInfo.ext_info.vsd_sect_found = true;
     }
     else if (CHECK_DEV_INFO_OLD_FORMAT(cib_dev_info))
@@ -442,7 +443,7 @@ bool Fs3Operations::GetDevInfo(u_int8_t* buff)
         CHECK_UID_STRUCTS_SIZE(_fs3ImgInfo.ext_info.fs3_uids_info.cib_uids, cib_dev_info.guids);
         memcpy(&_fs3ImgInfo.ext_info.fs3_uids_info.cib_uids, &cib_dev_info.guids, sizeof(cib_dev_info.guids));
         strcpy(_fwImgInfo.ext_info.vsd, cib_dev_info.vsd);
-        _fs3ImgInfo.ext_info.fs3_uids_info.valid_field = 0;
+        _fs3ImgInfo.ext_info.fs3_uids_info.guid_format = CIB_UIDS;
         _fwImgInfo.ext_info.vsd_sect_found = true;
     }
     else
@@ -1057,12 +1058,11 @@ bool Fs3Operations::FwInit()
     return true;
 }
 
-#define GET_DIFFER_STR(flash_toc_entry, image_toc_entry)             \
-    (flash_toc_entry->device_data != image_toc_entry->device_data) ? \
-      "device_data" :                                                \
-      (flash_toc_entry->no_crc != image_toc_entry->no_crc) ?         \
-      "no_crc" :                                                     \
-      (flash_toc_entry->relative_addr != image_toc_entry->relative_addr) ? "relative_addr" : ""
+#define GET_DIFFER_STR(flash_toc_entry, image_toc_entry)                                   \
+    (flash_toc_entry->device_data != image_toc_entry->device_data)     ? "device_data" :   \
+    (flash_toc_entry->no_crc != image_toc_entry->no_crc)               ? "no_crc" :        \
+    (flash_toc_entry->relative_addr != image_toc_entry->relative_addr) ? "relative_addr" : \
+                                                                         ""
 
 bool Fs3Operations::UpdateDevDataITOC(Fs3Operations& imageOps,
                                       struct toc_info* image_toc_info_entry,
@@ -1773,14 +1773,18 @@ bool Fs3Operations::FwSetGuids(sg_params_t& sgParam, PrintCallBack callBackFunc,
         return errmsg("guids override is not set, cannot set device guids");
     }
 
-    usrGuid.num_of_guids_pp[0] =
-      sgParam.usePPAttr ? sgParam.numOfGUIDsPP[0] : sgParam.numOfGUIDs ? sgParam.numOfGUIDs : DEFAULT_GUID_NUM;
-    usrGuid.step_size_pp[0] =
-      sgParam.usePPAttr ? sgParam.stepSizePP[0] : sgParam.stepSize ? sgParam.stepSize : DEFAULT_STEP;
-    usrGuid.num_of_guids_pp[1] =
-      sgParam.usePPAttr ? sgParam.numOfGUIDsPP[1] : sgParam.numOfGUIDs ? sgParam.numOfGUIDs : DEFAULT_GUID_NUM;
-    usrGuid.step_size_pp[1] =
-      sgParam.usePPAttr ? sgParam.stepSizePP[1] : sgParam.stepSize ? sgParam.stepSize : DEFAULT_STEP;
+    usrGuid.num_of_guids_pp[0] = sgParam.usePPAttr  ? sgParam.numOfGUIDsPP[0] :
+                                 sgParam.numOfGUIDs ? sgParam.numOfGUIDs :
+                                                      DEFAULT_GUID_NUM;
+    usrGuid.step_size_pp[0] = sgParam.usePPAttr ? sgParam.stepSizePP[0] :
+                              sgParam.stepSize  ? sgParam.stepSize :
+                                                  DEFAULT_STEP;
+    usrGuid.num_of_guids_pp[1] = sgParam.usePPAttr  ? sgParam.numOfGUIDsPP[1] :
+                                 sgParam.numOfGUIDs ? sgParam.numOfGUIDs :
+                                                      DEFAULT_GUID_NUM;
+    usrGuid.step_size_pp[1] = sgParam.usePPAttr ? sgParam.stepSizePP[1] :
+                              sgParam.stepSize  ? sgParam.stepSize :
+                                                  DEFAULT_STEP;
     usrGuid.use_pp_attr = 1;
 
     usrGuid.base_guid_specified = false;
@@ -3533,7 +3537,8 @@ bool Fs3Operations::GetImageDataForSign(MlxSign::SHAType shaType, vector<u_int8_
 bool Fs3Operations::FwExtract4MBImage(vector<u_int8_t>& img,
                                       bool maskMagicPatternAndDevToc,
                                       bool verbose,
-                                      bool ignoreImageStart)
+                                      bool ignoreImageStart,
+                                      bool)
 {
     u_int32_t size = 0;
 

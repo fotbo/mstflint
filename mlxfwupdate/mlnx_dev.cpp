@@ -122,6 +122,7 @@ void MlnxDev::_MlnxDevInit(int compare_ffv)
     guidPortTwo = "N/A";
     macPortOne = "N/A";
     macPortTwo = "N/A";
+    baseGuid = "";
     _deviceTypeStr = "N/A";
     _deviceType = DeviceUnknown;
     memset(&_devFwParams, 0, sizeof(_devFwParams));
@@ -232,7 +233,15 @@ void MlnxDev::setGuidMac(fw_info_t& fw_query)
     }
     else
     {
-        if (fw_query.fs3_info.fs3_uids_info.valid_field)
+        if (fw_query.fs3_info.fs3_uids_info.guid_format == MULTI_ASIC_GUIDS)
+        {
+            snprintf(buff, sizeof(buff) - 1, "%016" U64H_FMT_GEN,
+                     fw_query.fs3_info.fs3_uids_info.multi_asic_guids.sys_guid);
+            baseGuid = buff;
+            snprintf(buff, sizeof(buff) - 1, "%016" U64H_FMT_GEN,
+                     fw_query.fs3_info.fs3_uids_info.multi_asic_guids.node_guid);
+        }
+        else if (fw_query.fs3_info.fs3_uids_info.guid_format == IMAGE_LAYOUT_UIDS)
         {
             snprintf(buff, sizeof(buff) - 1, "%016" U64H_FMT_GEN,
                      fw_query.fs3_info.fs3_uids_info.image_layout_uids.base_guid.uid);
@@ -243,11 +252,22 @@ void MlnxDev::setGuidMac(fw_info_t& fw_query)
                      fw_query.fs3_info.fs3_uids_info.cib_uids.guids[0].uid);
         }
         if (fw_query.fs3_info.fs3_uids_info.cib_uids.guids[0].uid ||
-            fw_query.fs3_info.fs3_uids_info.image_layout_uids.base_guid.uid)
+            fw_query.fs3_info.fs3_uids_info.image_layout_uids.base_guid.uid ||
+            fw_query.fs3_info.fs3_uids_info.multi_asic_guids.node_guid)
         {
             guidPortOne = (string)buff;
         }
-        if (fw_query.fs3_info.fs3_uids_info.valid_field)
+        if (fw_query.fs3_info.fs3_uids_info.guid_format == MULTI_ASIC_GUIDS)
+        {
+            if (fw_query.fs3_info.fs3_uids_info.multi_asic_guids.image_layout_uids.base_mac.uid)
+            {
+                snprintf(buff, sizeof(buff) - 1, "%012" U64H_FMT_GEN,
+                         fw_query.fs3_info.fs3_uids_info.multi_asic_guids.image_layout_uids.base_mac.uid);
+                macPortOne = (string)buff;
+            }
+            sprintf(buff, " ");
+        }
+        else if (fw_query.fs3_info.fs3_uids_info.guid_format == IMAGE_LAYOUT_UIDS)
         {
             snprintf(buff, sizeof(buff) - 1, "%012" U64H_FMT_GEN,
                      fw_query.fs3_info.fs3_uids_info.image_layout_uids.base_mac.uid);
@@ -388,7 +408,7 @@ void MlnxDev::setDeviceType(void)
     }
     else if (dm_is_4th_gen(ptr_dm_dev_id))
     {
-        u_int32_t mac;
+        u_int32_t mac = 0;
         if ((mread4(mf, 0x1f148, &mac)) == 4)
         { // port1
             portOneType = EXT(mac, 30, 29) != 1 ? PORT_ETH : PORT_IB;
@@ -414,7 +434,7 @@ void MlnxDev::setDeviceType(void)
     {
         try
         {
-            _commander = Commander::create(mf, getDevName(), "");
+            _commander = Commander::create(mf, "");
         }
         catch (MlxcfgException& e)
         {
@@ -834,7 +854,7 @@ int MlnxDev::queryFwops()
     }
 
     // attempt to take some fields from image info
-    if (fw_query.fw_type == FIT_FS3 || fw_query.fw_type == FIT_FS4)
+    if (fw_query.fw_type == FIT_FS3 || fw_query.fw_type == FIT_FS4 || fw_query.fw_type == FIT_FS5)
     {
         if (strlen(fw_query.fs3_info.description))
         {

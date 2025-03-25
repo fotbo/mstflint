@@ -1,14 +1,34 @@
 /*
- * Copyright (c) 2013-2021 NVIDIA CORPORATION & AFFILIATES. ALL RIGHTS RESERVED.
- *
- * This software product is a proprietary product of Nvidia Corporation and its affiliates
- * (the "Company") and all right, title, and interest in and to the software
- * product, including all associated intellectual property rights, are and
- * shall remain exclusively with the Company.
- *
- * This software product is governed by the End User License Agreement
- * provided with the software product.
- */
+* Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. ALL RIGHTS RESERVED.
+*
+* This software is available to you under a choice of one of two
+* licenses.  You may choose to be licensed under the terms of the GNU
+* General Public License (GPL) Version 2, available from the file
+* COPYING in the main directory of this source tree, or the
+* OpenIB.org BSD license below:
+*
+*     Redistribution and use in source and binary forms, with or
+*     without modification, are permitted provided that the following
+*     conditions are met:
+*
+*      - Redistributions of source code must retain the above
+*        copyright notice, this list of conditions and the following
+*        disclaimer.
+*
+*      - Redistributions in binary form must reproduce the above
+*        copyright notice, this list of conditions and the following
+*        disclaimer in the documentation and/or other materials
+*        provided with the distribution.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+* NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+* BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+* ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+* CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+* SOFTWARE.
+*/
 
 #ifndef FS_SYNCE_OPS
 #define FS_SYNCE_OPS
@@ -45,18 +65,24 @@ public:
     bool PrintQuery() override;
     u_int32_t GetDeviceIndex() override;
     bool IsCompatibleToDevice(vector<u_int8_t>& data, u_int8_t forceVersion) override;
+    const char* FwGetResetRecommandationStr() override;
+    FwComponent::comps_ids_t GetComponentID() override { return FwComponent::comps_ids_t::COMPID_CLOCK_SYNC_EEPROM; }
     static void PrintComponentData(vector<u_int8_t>& data, u_int32_t deviceIndex);
 
 private:
     enum class SystemID : u_int16_t
     {
-        Gorilla = 1,
-        AnacondaSecured = 2,
-        MarlinLeaf = 3,
-        MarlinSpine = 4,
-        Moose = 5,
-        Komodo = 6,
-        Kong = 7
+        Gorilla = 0x1,
+        AnacondaSecured = 0x2,
+        MarlinLeaf = 0x3,
+        MarlinSpine = 0x4,
+        Moose = 0x5,
+        Komodo = 0x6,
+        Kong = 0x7,
+        Hippo = 0x8,
+        Crocodile = 0x9,
+        BlackMamba = 0xA,
+        Bobcat = 0xB
     };
 
     enum class ClockSyncVendorHWID : u_int8_t
